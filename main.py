@@ -31,6 +31,7 @@ class CommunityBot(commands.Bot):
         super().__init__(command_prefix=PREFIX, intents=intents, help_command=None)
 
     async def setup_hook(self):
+        await self.load_extension("cogs.setups")
         synced = await self.tree.sync()
         log.info("Synced %d slash command(s)", len(synced))
 
@@ -75,6 +76,18 @@ def help_embed() -> discord.Embed:
     e.add_field(name="hello", value="Say hello", inline=False)
     e.add_field(name="serverinfo", value="Info about this server", inline=False)
     e.add_field(name="userinfo [member]", value="Info about a member", inline=False)
+    e.add_field(
+        name="🎧 Setup profiles",
+        value=(
+            "`/setup edit` — add/edit your gear chain\n"
+            "`/setup extras` — accessories, genres, notes\n"
+            "`/setup view [member]` — show a setup\n"
+            "`/setup clear` — delete your setup\n"
+            "Right-click a user → Apps → **View Setup**"
+        ),
+        inline=False,
+    )
+    e.add_field(name="🔍 whohas <gear>", value="Find members who own a piece of gear", inline=False)
     e.set_footer(text=f"Use /command or {PREFIX}command")
     return e
 
@@ -167,6 +180,9 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         return
     if isinstance(error, commands.MemberNotFound):
         await ctx.send("Couldn't find that member.")
+        return
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing `{error.param.name}`. Usage: `{PREFIX}{ctx.command.qualified_name} {ctx.command.signature}`")
         return
     if isinstance(error, commands.NoPrivateMessage):
         await ctx.send("That command only works in a server.")
