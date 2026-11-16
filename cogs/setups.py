@@ -21,7 +21,7 @@ GOLD = discord.Color.from_rgb(212, 175, 55)
 # Each group = one form (Discord max 5 inputs per form). New group → add to FORM_GROUPS.
 CHAIN_FIELDS = [
     ("source", "Source", "🎵", "One per line, e.g.\nQobuz on PC\nWiiM Pro\nRega Planar 3", True, 500),
-    ("dac", "DAC & DAC/AMP", "🔌", "One per line, e.g.\nTopping D90SE\nFiiO K9 Pro", True, 500),
+    ("dac", "DACs & DAC/AMPs", "🔌", "One per line, e.g.\nTopping D90SE\nFiiO K9 Pro", True, 500),
     ("amp", "Amp", "⚡", "One per line, e.g.\nSchiit Jotunheim 2\nCayin HA-6A", True, 500),
 ]
 LISTEN_FIELDS = [
@@ -110,9 +110,6 @@ class SetupDB:
 
 # ---------- Embeds ----------
 
-SECTION_ORDER = ["source", "dac", "amp", "headphones", "iems", "speakers", "other", "genres", "notes"]
-
-
 def render_items(key: str, items: list[str]) -> str:
     if key == "notes":
         return clip("\n".join(f"> {ln}" for ln in items), 1024)
@@ -122,7 +119,7 @@ def render_items(key: str, items: list[str]) -> str:
 
 
 def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
-    """One embed, all sections stacked vertically. Max field sizes keep it under Discord's 6000-char limit."""
+    """One embed with everything. Max field sizes keep it under Discord's 6000-char limit."""
     color = getattr(member, "color", None)
     color = color if color and color.value else GOLD
 
@@ -138,13 +135,21 @@ def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
 
     e = discord.Embed(title=f"🎧 {member.display_name}'s Setup", color=color, description=summary)
     e.set_thumbnail(url=member.display_avatar.url)
-    for key in SECTION_ORDER:
+    # Side-by-side rows of 3 (Source/DAC/Amp, Headphones/IEMs/Speakers).
+    # A row shows if any of its fields is filled; empty ones get "—" so columns stay aligned.
+    for group in (CHAIN_FIELDS, LISTEN_FIELDS):
+        if any(lines_of(row.get(key)) for key, *_ in group):
+            for key, label, emoji, *_ in group:
+                items = lines_of(row.get(key))
+                e.add_field(name=f"{emoji} {label}", value=render_items(key, items) if items else "—", inline=True)
+
+    # Extras stacked full width, only when filled
+    for key, label, emoji, *_ in EXTRA_FIELDS:
         if key == "notes":
             items = [ln.strip() for ln in (row.get(key) or "").splitlines() if ln.strip()]
         else:
             items = lines_of(row.get(key))
         if items:
-            _, label, emoji, *_ = FIELD_INFO[key]
             e.add_field(name=f"{emoji} {label}", value=render_items(key, items), inline=False)
     if not e.fields:
         e.description = (summary + "\n\n" if summary else "") + "*No gear listed yet.*"
