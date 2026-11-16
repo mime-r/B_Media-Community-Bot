@@ -46,6 +46,38 @@ FIELD_INFO = {f[0]: f for f in ALL_FIELDS}
 SEARCH_KEYS = ["source", "dac", "amp", "headphones", "iems", "speakers", "other"]
 ENDPOINT_KEYS = ("headphones", "iems", "speakers")
 
+VIEW_COOLDOWN = 60  # seconds between public setup posts per user
+
+
+class UserCooldown:
+    """Per-user cooldown shared by /setup view, !setup and the Share button."""
+
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        self.last: dict[int, float] = {}
+
+    def remaining(self, user_id: int) -> float:
+        return max(0.0, self.last.get(user_id, 0) + self.seconds - time.monotonic())
+
+    def trigger(self, user_id: int):
+        now = time.monotonic()
+        self.last[user_id] = now
+        # prune expired entries so the dict doesn't grow forever
+        if len(self.last) > 1000:
+            self.last = {u: t for u, t in self.last.items() if now - t < self.seconds}
+
+
+view_cooldown = UserCooldown(VIEW_COOLDOWN)
+
+
+def cooldown_message(user_id: int) -> str | None:
+    """Return a 'slow down' message if user is on cooldown, else None."""
+    left = view_cooldown.remaining(user_id)
+    if left <= 0:
+        return None
+    ready_at = int(time.time() + left)
+    return f"⏳ Slow down! You can post a setup again <t:{ready_at}:R>."
+
 
 def norm(text: str | None) -> str:
     """Lowercase + strip non-alphanumerics so 'HD 800 S' matches 'hd800s'."""
@@ -246,6 +278,10 @@ class ShareView(discord.ui.View):
         if row is None:
             await interaction.response.edit_message(content="That setup no longer exists.", embed=None, view=None)
             return
+        if msg := cooldown_message(interaction.user.id):
+            await interaction.response.send_message(msg, ephemeral=True)  # keep button for later
+            return
+        view_cooldown.trigger(interaction.user.id)
         await interaction.response.edit_message(content="📢 Shared to the channel!", view=None)
         self.stop()
         if self.member.id == interaction.user.id:
@@ -336,6 +372,10 @@ class Setups(commands.Cog):
                 embed=no_setup_embed(member, member == interaction.user), ephemeral=True
             )
             return
+        if msg := cooldown_message(interaction.user.id):
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+        view_cooldown.trigger(interaction.user.id)
         await send_setup(interaction, self.db, member, row)
 
     # /setup edit
@@ -402,6 +442,10 @@ class Setups(commands.Cog):
         if row is None:
             await ctx.send(embed=no_setup_embed(member, member == ctx.author))
             return
+        if msg := cooldown_message(ctx.author.id):
+            await ctx.send(f"{ctx.author.mention} {msg}", delete_after=10)  # auto-clean to avoid clutter
+            return
+        view_cooldown.trigger(ctx.author.id)
         await send_setup(ctx, self.db, member, row)
 
     @commands.command(name="whohas")

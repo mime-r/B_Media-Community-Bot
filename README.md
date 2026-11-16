@@ -16,6 +16,8 @@ Simple Discord bot (discord.py) with slash + prefix commands and welcome message
 | `/setup clear` | — | Delete your setup (with confirm) |
 | `/whohas <gear>` | `!whohas <gear>` | Find members owning gear (autocomplete, fuzzy: `hd800s` matches `HD 800 S`) |
 
+| `/slowmode <seconds> [channel]` | `!slowmode <seconds> [#channel]` | Mods only. Native Discord slowmode with any value 0–21600s (e.g. 3s, below the app's 5s preset) |
+
 Right-click a user → **Apps → View Setup** also works.
 
 Auto welcome embed when someone joins.
@@ -27,7 +29,7 @@ Setups are stored in `bmedia.db` (SQLite, created automatically next to `main.py
 1. https://discord.com/developers/applications → **New Application** → name `B_Media Community Bot`.
 2. **Bot** tab → **Reset Token** → copy token (keep secret).
 3. Same tab → enable **Server Members Intent** and **Message Content Intent**.
-4. **OAuth2 → URL Generator** → scopes `bot` + `applications.commands`; permissions: Send Messages, Embed Links, Read Message History, View Channels. Open URL → invite to server.
+4. **OAuth2 → URL Generator** → scopes `bot` + `applications.commands`; permissions: Send Messages, Embed Links, Read Message History, View Channels, Manage Channels (for `/slowmode`). Open URL → invite to server.
 
 ## 2. Run locally (optional)
 ```

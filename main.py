@@ -32,6 +32,7 @@ class CommunityBot(commands.Bot):
 
     async def setup_hook(self):
         await self.load_extension("cogs.setups")
+        await self.load_extension("cogs.moderation")
         synced = await self.tree.sync()
         log.info("Synced %d slash command(s)", len(synced))
 
@@ -87,6 +88,7 @@ def help_embed() -> discord.Embed:
         inline=False,
     )
     e.add_field(name="🔍 whohas <gear>", value="Find members who own a piece of gear", inline=False)
+    e.add_field(name="🐢 slowmode <seconds> [channel]", value="*Mods:* custom slowmode, any seconds (e.g. 3). 0 = off", inline=False)
     e.set_footer(text=f"Use /command or {PREFIX}command")
     return e
 
