@@ -18,11 +18,15 @@ GOLD = discord.Color.from_rgb(212, 175, 55)
 # (key, label, emoji, placeholder, paragraph?, max_length)
 # Convention: every list-type field is a paragraph input, one item per line
 # (rendered as bullets in the embed). Follow this for any new field.
-GEAR_FIELDS = [
+# Each group = one form (Discord max 5 inputs per form). New group → add to FORM_GROUPS.
+CHAIN_FIELDS = [
     ("source", "Source", "🎵", "One per line, e.g.\nQobuz on PC\nWiiM Pro\nRega Planar 3", True, 500),
     ("dac", "DAC & DAC/AMP", "🔌", "One per line, e.g.\nTopping D90SE\nFiiO K9 Pro", True, 500),
     ("amp", "Amp", "⚡", "One per line, e.g.\nSchiit Jotunheim 2\nCayin HA-6A", True, 500),
-    ("headphones", "Headphones & IEMs", "🎧", "One per line, e.g.\nSennheiser HD 800 S\nMoondrop Blessing 3", True, 500),
+]
+LISTEN_FIELDS = [
+    ("headphones", "Headphones", "🎧", "One per line, e.g.\nSennheiser HD 800 S\nHifiman Arya", True, 500),
+    ("iems", "IEMs", "👂", "One per line, e.g.\nMoondrop Blessing 3\nThieaudio Monarch", True, 500),
     ("speakers", "Speakers", "🔊", "One per line, e.g.\nKEF LS50 Meta\nSVS SB-1000 Pro", True, 500),
 ]
 EXTRA_FIELDS = [
@@ -30,10 +34,17 @@ EXTRA_FIELDS = [
     ("genres", "Favorite Genres", "🎼", "One per line, e.g.\nJazz\nClassical\nProg Rock", True, 300),
     ("notes", "Notes", "📝", "EQ, target curve, dream gear, room details...", True, 500),
 ]
-ALL_FIELDS = GEAR_FIELDS + EXTRA_FIELDS
+# (button label, emoji, form title, fields)
+FORM_GROUPS = [
+    ("Source / DAC / Amp", "🎛️", "Your Audio Chain", CHAIN_FIELDS),
+    ("Headphones / IEMs / Speakers", "🎧", "Headphones, IEMs & Speakers", LISTEN_FIELDS),
+    ("Extras", "🧰", "Extras", EXTRA_FIELDS),
+]
+ALL_FIELDS = CHAIN_FIELDS + LISTEN_FIELDS + EXTRA_FIELDS
 FIELD_INFO = {f[0]: f for f in ALL_FIELDS}
 # Fields that count as "owned gear" for /whohas
-SEARCH_KEYS = ["source", "dac", "amp", "headphones", "speakers", "other"]
+SEARCH_KEYS = ["source", "dac", "amp", "headphones", "iems", "speakers", "other"]
+ENDPOINT_KEYS = ("headphones", "iems", "speakers")
 
 
 def norm(text: str | None) -> str:
@@ -60,6 +71,11 @@ class SetupDB:
         self.conn.execute(
             f"CREATE TABLE IF NOT EXISTS setups (user_id INTEGER PRIMARY KEY, {cols}, updated_at INTEGER)"
         )
+        # Auto-migrate: add columns for fields added after the DB was created
+        existing = {r["name"] for r in self.conn.execute("PRAGMA table_info(setups)")}
+        for key, *_ in ALL_FIELDS:
+            if key not in existing:
+                self.conn.execute(f"ALTER TABLE setups ADD COLUMN {key} TEXT")
         self.conn.commit()
 
     def get(self, user_id: int) -> dict | None:
@@ -94,78 +110,50 @@ class SetupDB:
 
 # ---------- Embeds ----------
 
-LINES_PER_PAGE = 14  # item lines + field headers per page before splitting
-SECTION_ORDER = ["source", "dac", "amp", "headphones", "speakers", "other", "genres", "notes"]
-INLINE_KEYS = {"source", "dac", "amp", "headphones", "speakers"}
+SECTION_ORDER = ["source", "dac", "amp", "headphones", "iems", "speakers", "other", "genres", "notes"]
 
 
-def render_items(key: str, items: list[str], bulleted: bool) -> str:
+def render_items(key: str, items: list[str]) -> str:
     if key == "notes":
         return clip("\n".join(f"> {ln}" for ln in items), 1024)
-    if not bulleted:
+    if len(items) == 1:
         return clip(items[0], 1024)
     return clip("\n".join(f"• {i}" for i in items), 1024)
 
 
-def build_setup_pages(member: discord.abc.User, row: dict) -> list[discord.Embed]:
-    """Build one or more embeds; long sections split across pages with '(cont.)'."""
+def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
+    """One embed, all sections stacked vertically. Max field sizes keep it under Discord's 6000-char limit."""
     color = getattr(member, "color", None)
     color = color if color and color.value else GOLD
 
-    # Signal chain summary: first item of each stage (page 1 only)
+    # Signal chain summary: first item of each stage
     chain = []
     for key in ("source", "dac", "amp"):
         if items := lines_of(row.get(key)):
             chain.append(f"`{clip(items[0], 30)}`")
-    endpoints = [f"`{clip(lines_of(row.get(k))[0], 30)}`" for k in ("headphones", "speakers") if lines_of(row.get(k))]
+    endpoints = [f"`{clip(lines_of(row.get(k))[0], 30)}`" for k in ENDPOINT_KEYS if lines_of(row.get(k))]
     if endpoints:
         chain.append(" / ".join(endpoints))
     summary = "**Signal chain**\n" + " ➜ ".join(chain) if len(chain) > 1 else None
 
-    # Distribute fields across pages
-    pages: list[list[tuple[str, str, bool]]] = [[]]
-    used = 0
+    e = discord.Embed(title=f"🎧 {member.display_name}'s Setup", color=color, description=summary)
+    e.set_thumbnail(url=member.display_avatar.url)
     for key in SECTION_ORDER:
         if key == "notes":
             items = [ln.strip() for ln in (row.get(key) or "").splitlines() if ln.strip()]
         else:
             items = lines_of(row.get(key))
-        if not items:
-            continue
-        _, label, emoji, *_ = FIELD_INFO[key]
-        bulleted = len(items) > 1
-        first = True
-        while items:
-            room = LINES_PER_PAGE - used - 1  # -1 for the field header
-            if pages[-1] and room < min(2, len(items)):  # avoid orphaning one line at page bottom
-                pages.append([])
-                used, room = 0, LINES_PER_PAGE - 1
-            chunk, items = items[:room], items[room:]
-            name = f"{emoji} {label}" + ("" if first else " (cont.)")
-            pages[-1].append((name, render_items(key, chunk, bulleted), key in INLINE_KEYS))
-            used += len(chunk) + 1
-            first = False
-
-    total = len(pages)
-    embeds = []
-    for i, fields in enumerate(pages):
-        e = discord.Embed(title=f"🎧 {member.display_name}'s Setup", color=color)
-        e.set_thumbnail(url=member.display_avatar.url)
-        if i == 0:
-            e.description = summary
-            if not fields:
-                e.description = (summary + "\n\n" if summary else "") + "*No gear listed yet.*"
-        for name, value, inline in fields:
-            e.add_field(name=name, value=value, inline=inline)
-        footer = ["B_Media Community"]
-        if total > 1:
-            footer.insert(0, f"Page {i + 1}/{total}")
-        if row.get("updated_at"):
-            footer.append("Last updated")
-            e.timestamp = datetime.fromtimestamp(row["updated_at"], tz=timezone.utc)
-        e.set_footer(text=" • ".join(footer))
-        embeds.append(e)
-    return embeds
+        if items:
+            _, label, emoji, *_ = FIELD_INFO[key]
+            e.add_field(name=f"{emoji} {label}", value=render_items(key, items), inline=False)
+    if not e.fields:
+        e.description = (summary + "\n\n" if summary else "") + "*No gear listed yet.*"
+    if row.get("updated_at"):
+        e.timestamp = datetime.fromtimestamp(row["updated_at"], tz=timezone.utc)
+        e.set_footer(text="B_Media Community • Last updated")
+    else:
+        e.set_footer(text="B_Media Community")
+    return e
 
 
 def no_setup_embed(member: discord.abc.User, is_self: bool) -> discord.Embed:
@@ -240,52 +228,12 @@ class ProfileModal(discord.ui.Modal):
         )
 
 
-class SetupView(discord.ui.View):
-    """Page buttons (◀ 1/3 ▶) and optional 'Share to channel' for setup embeds."""
+class ShareView(discord.ui.View):
+    """'Share to channel' button on private (ephemeral) setup embeds."""
 
-    def __init__(self, db: SetupDB, member: discord.abc.User, pages: list[discord.Embed],
-                 owner_id: int, shareable: bool):
-        super().__init__(timeout=300)
-        self.db, self.member, self.pages, self.owner_id = db, member, pages, owner_id
-        self.index = 0
-        self.message: discord.Message | None = None
-        if len(pages) <= 1:
-            for item in (self.prev, self.counter, self.next):
-                self.remove_item(item)
-        if not shareable:
-            self.remove_item(self.share)
-        self._sync()
-
-    def _sync(self):
-        self.counter.label = f"{self.index + 1}/{len(self.pages)}"
-        self.prev.disabled = self.index == 0
-        self.next.disabled = self.index == len(self.pages) - 1
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message(
-                "Only the person who ran this can use these buttons — try `/setup view` yourself!",
-                ephemeral=True,
-            )
-            return False
-        return True
-
-    async def _flip(self, interaction: discord.Interaction, step: int):
-        self.index = max(0, min(len(self.pages) - 1, self.index + step))
-        self._sync()
-        await interaction.response.edit_message(embed=self.pages[self.index], view=self)
-
-    @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary)
-    async def prev(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._flip(interaction, -1)
-
-    @discord.ui.button(label="1/1", style=discord.ButtonStyle.secondary, disabled=True)
-    async def counter(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        pass
-
-    @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary)
-    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._flip(interaction, 1)
+    def __init__(self, db: SetupDB, member: discord.abc.User):
+        super().__init__(timeout=600)
+        self.db, self.member = db, member
 
     @discord.ui.button(label="Share to channel", emoji="📢", style=discord.ButtonStyle.primary)
     async def share(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -299,37 +247,45 @@ class SetupView(discord.ui.View):
             content = f"{interaction.user.mention} shared their setup"
         else:
             content = f"{interaction.user.mention} shared {self.member.mention}'s setup"
-        await send_setup(interaction, self.db, self.member, row, shareable=False,
-                         ephemeral=False, content=content, followup=True)
-
-    async def on_timeout(self):
-        if self.message:
-            try:
-                await self.message.edit(view=None)
-            except discord.HTTPException:
-                pass
+        await send_setup(interaction, self.db, self.member, row, content=content, followup=True)
 
 
 async def send_setup(target: discord.Interaction | commands.Context, db: SetupDB,
                      member: discord.abc.User, row: dict, *, shareable: bool = False,
                      ephemeral: bool = False, content: str | None = None, followup: bool = False):
-    """Send a (possibly multi-page) setup embed via slash response, followup, or prefix ctx."""
-    pages = build_setup_pages(member, row)
-    owner = target.user if isinstance(target, discord.Interaction) else target.author
-    view = SetupView(db, member, pages, owner.id, shareable) if len(pages) > 1 or shareable else None
-    kwargs = {"content": content, "embed": pages[0], "allowed_mentions": discord.AllowedMentions.none()}
-    if view:
-        kwargs["view"] = view
+    """Send a setup embed via slash response, followup, or prefix ctx."""
+    kwargs = {
+        "content": content,
+        "embed": build_setup_embed(member, row),
+        "allowed_mentions": discord.AllowedMentions.none(),
+    }
+    if shareable:
+        kwargs["view"] = ShareView(db, member)
 
     if isinstance(target, commands.Context):
-        msg = await target.send(**kwargs)
+        await target.send(**kwargs)
     elif followup:
-        msg = await target.followup.send(**kwargs, ephemeral=ephemeral, wait=True)
+        await target.followup.send(**kwargs, ephemeral=ephemeral)
     else:
         await target.response.send_message(**kwargs, ephemeral=ephemeral)
-        msg = await target.original_response()
-    if view:
-        view.message = msg
+
+
+class EditPanel(discord.ui.View):
+    """Private panel from /setup edit: one button per form group."""
+
+    def __init__(self, db: SetupDB):
+        super().__init__(timeout=600)
+        self.db = db
+        for label, emoji, title, fields in FORM_GROUPS:
+            button = discord.ui.Button(label=label, emoji=emoji, style=discord.ButtonStyle.primary)
+            button.callback = self._opener(title, fields)
+            self.add_item(button)
+
+    def _opener(self, title: str, fields: list):
+        async def callback(interaction: discord.Interaction):
+            current = self.db.get(interaction.user.id) or {}
+            await interaction.response.send_modal(ProfileModal(self.db, title, fields, current))
+        return callback
 
 
 class ConfirmClear(discord.ui.View):
@@ -378,16 +334,14 @@ class Setups(commands.Cog):
         await send_setup(interaction, self.db, member, row)
 
     # /setup edit
-    @setup_group.command(name="edit", description="Add or edit your gear chain")
+    @setup_group.command(name="edit", description="Add or edit your gear")
     async def setup_edit(self, interaction: discord.Interaction):
-        current = self.db.get(interaction.user.id) or {}
-        await interaction.response.send_modal(ProfileModal(self.db, "Your Audio Chain", GEAR_FIELDS, current))
-
-    # /setup extras
-    @setup_group.command(name="extras", description="Add accessories, favorite genres and notes")
-    async def setup_extras(self, interaction: discord.Interaction):
-        current = self.db.get(interaction.user.id) or {}
-        await interaction.response.send_modal(ProfileModal(self.db, "Extras", EXTRA_FIELDS, current))
+        embed = discord.Embed(
+            title="🛠️ Edit your setup",
+            description="Pick a section to edit. Put **one item per line**.\nYou can come back and edit any section anytime.",
+            color=GOLD,
+        )
+        await interaction.response.send_message(embed=embed, view=EditPanel(self.db), ephemeral=True)
 
     # /setup clear
     @setup_group.command(name="clear", description="Delete your setup profile")

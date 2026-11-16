@@ -11,8 +11,7 @@ Simple Discord bot (discord.py) with slash + prefix commands and welcome message
 | `/serverinfo` | `!serverinfo` | Server stats |
 | `/userinfo [member]` | `!userinfo [member]` | Member info |
 
-| `/setup edit` | — | Form to add/edit gear chain (source, DAC, amp, headphones/IEMs, speakers) |
-| `/setup extras` | — | Form for accessories, favorite genres, notes |
+| `/setup edit` | — | Panel with 3 forms: Source/DAC/Amp · Headphones/IEMs/Speakers · Extras (accessories, genres, notes) |
 | `/setup view [member]` | `!setup [member]` | Show a setup embed |
 | `/setup clear` | — | Delete your setup (with confirm) |
 | `/whohas <gear>` | `!whohas <gear>` | Find members owning gear (autocomplete, fuzzy: `hd800s` matches `HD 800 S`) |

@@ -79,8 +79,7 @@ def help_embed() -> discord.Embed:
     e.add_field(
         name="🎧 Setup profiles",
         value=(
-            "`/setup edit` — add/edit your gear chain\n"
-            "`/setup extras` — accessories, genres, notes\n"
+            "`/setup edit` — add/edit your gear, IEMs, speakers & extras\n"
             "`/setup view [member]` — show a setup\n"
             "`/setup clear` — delete your setup\n"
             "Right-click a user → Apps → **View Setup**"
