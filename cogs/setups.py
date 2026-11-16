@@ -26,7 +26,8 @@ CHAIN_FIELDS = [
 ]
 LISTEN_FIELDS = [
     ("headphones", "Headphones", "🎧", "One per line, e.g.\nSennheiser HD 800 S\nHifiman Arya", True, 500),
-    ("iems", "IEMs", "👂", "One per line, e.g.\nMoondrop Blessing 3\nThieaudio Monarch", True, 500),
+    ("iems", "IEMs/Earbuds", "👂", "One per line, e.g.\nMoondrop Blessing 3\nThieaudio Monarch", True, 500),
+    ("flatheads", "Flatheads", "🔘", "One per line, e.g.\nSennheiser MX500\nYuin PK1\nVE Monk Plus", True, 500),
     ("speakers", "Speakers", "🔊", "One per line, e.g.\nKEF LS50 Meta\nSVS SB-1000 Pro", True, 500),
 ]
 EXTRA_FIELDS = [
@@ -37,14 +38,16 @@ EXTRA_FIELDS = [
 # (button label, emoji, form title, fields)
 FORM_GROUPS = [
     ("Source / DAC / Amp", "🎛️", "Your Audio Chain", CHAIN_FIELDS),
-    ("Headphones / IEMs / Speakers", "🎧", "Headphones, IEMs & Speakers", LISTEN_FIELDS),
+    ("Headphones / IEMs / Flatheads / Speakers", "🎧", "Headphones, IEMs, Flatheads & Speakers", LISTEN_FIELDS),
     ("Extras", "🧰", "Extras", EXTRA_FIELDS),
 ]
 ALL_FIELDS = CHAIN_FIELDS + LISTEN_FIELDS + EXTRA_FIELDS
 FIELD_INFO = {f[0]: f for f in ALL_FIELDS}
 # Fields that count as "owned gear" for /whohas
-SEARCH_KEYS = ["source", "dac", "amp", "headphones", "iems", "speakers", "other"]
-ENDPOINT_KEYS = ("headphones", "iems", "speakers")
+SEARCH_KEYS = ["source", "dac", "amp", "headphones", "iems", "flatheads", "speakers", "other"]
+ENDPOINT_KEYS = ("headphones", "iems", "flatheads", "speakers")
+# Shown only when filled in, placed after their row (never as "—" placeholders)
+OPTIONAL_KEYS = {"flatheads"}
 
 VIEW_COOLDOWN = 60  # seconds between public setup posts per user
 
@@ -169,11 +172,16 @@ def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
     e.set_thumbnail(url=member.display_avatar.url)
     # Side-by-side rows of 3 (Source/DAC/Amp, Headphones/IEMs/Speakers).
     # A row shows if any of its fields is filled; empty ones get "—" so columns stay aligned.
+    # Optional fields (e.g. Flatheads) appear only when filled, after their row.
     for group in (CHAIN_FIELDS, LISTEN_FIELDS):
-        if any(lines_of(row.get(key)) for key, *_ in group):
-            for key, label, emoji, *_ in group:
+        core = [f for f in group if f[0] not in OPTIONAL_KEYS]
+        if any(lines_of(row.get(key)) for key, *_ in core):
+            for key, label, emoji, *_ in core:
                 items = lines_of(row.get(key))
                 e.add_field(name=f"{emoji} {label}", value=render_items(key, items) if items else "—", inline=True)
+        for key, label, emoji, *_ in group:
+            if key in OPTIONAL_KEYS and (items := lines_of(row.get(key))):
+                e.add_field(name=f"{emoji} {label}", value=render_items(key, items), inline=True)
 
     # Extras stacked full width, only when filled
     for key, label, emoji, *_ in EXTRA_FIELDS:
