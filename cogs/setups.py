@@ -35,13 +35,19 @@ EXTRA_FIELDS = [
     ("genres", "Favorite Genres", "🎼", "One per line, e.g.\nJazz\nClassical\nProg Rock", True, 300),
     ("notes", "Notes", "📝", "EQ, target curve, dream gear, room details...", True, 500),
 ]
+# Custom signal chain shown at the top of the embed. Empty → auto-built from gear.
+SIGNAL_FIELDS = [
+    ("signal_chain", "Signal Chain (one stage per line)", "🔗",
+     "One stage per line, in order, e.g.\nQobuz\nTopping D90SE\nSchiit Jotunheim 2\nHD 800 S", True, 300),
+]
 # (button label, emoji, form title, fields)
 FORM_GROUPS = [
     ("Source / DAC / Amp", "🎛️", "Your Audio Chain", CHAIN_FIELDS),
     ("Headphones / IEMs / Flatheads / Speakers", "🎧", "Headphones, IEMs, Flatheads & Speakers", LISTEN_FIELDS),
     ("Extras", "🧰", "Extras", EXTRA_FIELDS),
+    ("Signal Chain", "🔗", "Signal Chain", SIGNAL_FIELDS),
 ]
-ALL_FIELDS = CHAIN_FIELDS + LISTEN_FIELDS + EXTRA_FIELDS
+ALL_FIELDS = CHAIN_FIELDS + LISTEN_FIELDS + EXTRA_FIELDS + SIGNAL_FIELDS
 FIELD_INFO = {f[0]: f for f in ALL_FIELDS}
 # Fields that count as "owned gear" for /whohas
 SEARCH_KEYS = ["source", "dac", "amp", "headphones", "iems", "flatheads", "speakers", "other"]
@@ -153,20 +159,26 @@ def render_items(key: str, items: list[str]) -> str:
     return clip("\n".join(f"• {i}" for i in items), 1024)
 
 
+def auto_chain(row: dict) -> list[str]:
+    """Default signal chain: first item of each stage, endpoints joined with ' / '."""
+    chain = [items[0] for key in ("source", "dac", "amp") if (items := lines_of(row.get(key)))]
+    endpoints = [lines_of(row.get(k))[0] for k in ENDPOINT_KEYS if lines_of(row.get(k))]
+    if endpoints:
+        chain.append(" / ".join(endpoints))
+    return chain
+
+
 def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
     """One embed with everything. Max field sizes keep it under Discord's 6000-char limit."""
     color = getattr(member, "color", None)
     color = color if color and color.value else GOLD
 
-    # Signal chain summary: first item of each stage
-    chain = []
-    for key in ("source", "dac", "amp"):
-        if items := lines_of(row.get(key)):
-            chain.append(f"`{clip(items[0], 30)}`")
-    endpoints = [f"`{clip(lines_of(row.get(k))[0], 30)}`" for k in ENDPOINT_KEYS if lines_of(row.get(k))]
-    if endpoints:
-        chain.append(" / ".join(endpoints))
-    summary = "**Signal chain**\n" + " ➜ ".join(chain) if len(chain) > 1 else None
+    # Signal chain summary: user's custom chain if set, else auto-built from gear
+    custom = lines_of(row.get("signal_chain"))
+    chain = [f"`{clip(stage, 40)}`" for stage in custom] if custom else [
+        " / ".join(f"`{clip(part, 30)}`" for part in stage.split(" / ")) for stage in auto_chain(row)
+    ]
+    summary = "**Signal chain**\n" + " ➜ ".join(chain) if len(chain) > 1 or custom else None
 
     e = discord.Embed(title=f"🎧 {member.display_name}'s Setup", color=color, description=summary)
     e.set_thumbnail(url=member.display_avatar.url)
@@ -266,6 +278,11 @@ class ProfileModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         data = {k: (ti.value.strip() or None) for k, ti in self.inputs.items()}
+        # Unchanged auto chain → store nothing, so it keeps following gear edits
+        if "signal_chain" in data:
+            current = self.db.get(interaction.user.id) or {}
+            if lines_of(data["signal_chain"]) == auto_chain(current):
+                data["signal_chain"] = None
         self.db.upsert(interaction.user.id, data)
         await send_setup(
             interaction, self.db, interaction.user, self.db.get(interaction.user.id),
@@ -333,6 +350,9 @@ class EditPanel(discord.ui.View):
     def _opener(self, title: str, fields: list):
         async def callback(interaction: discord.Interaction):
             current = self.db.get(interaction.user.id) or {}
+            # Prefill signal chain with the auto-built one so users can tweak it
+            if not current.get("signal_chain") and (auto := auto_chain(current)):
+                current["signal_chain"] = "\n".join(auto)
             await interaction.response.send_modal(ProfileModal(self.db, title, fields, current))
         return callback
 
