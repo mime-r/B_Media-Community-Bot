@@ -15,7 +15,6 @@ except ImportError:
 
 BOT_NAME = "B_Media Community Bot"
 TOKEN = os.getenv("DISCORD_TOKEN")
-WELCOME_CHANNEL_ID = os.getenv("WELCOME_CHANNEL_ID")  # optional
 PREFIX = os.getenv("PREFIX", "!")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -23,7 +22,7 @@ log = logging.getLogger(BOT_NAME)
 
 intents = discord.Intents.default()
 intents.message_content = True  # needed for prefix commands (privileged)
-intents.members = True          # needed for welcome messages (privileged)
+intents.members = True          # needed for /whohas member lookups (privileged)
 
 
 class CommunityBot(commands.Bot):
@@ -33,6 +32,7 @@ class CommunityBot(commands.Bot):
     async def setup_hook(self):
         await self.load_extension("cogs.setups")
         await self.load_extension("cogs.moderation")
+        await self.load_extension("cogs.iemranking")
         synced = await self.tree.sync()
         log.info("Synced %d slash command(s)", len(synced))
 
@@ -46,27 +46,6 @@ bot = CommunityBot()
 async def on_ready():
     log.info("%s online as %s (ID: %s)", BOT_NAME, bot.user, bot.user.id)
     await bot.change_presence(activity=discord.Game(name=f"{PREFIX}help | /help"))
-
-
-@bot.event
-async def on_member_join(member: discord.Member):
-    channel = None
-    if WELCOME_CHANNEL_ID and WELCOME_CHANNEL_ID.isdigit():
-        channel = member.guild.get_channel(int(WELCOME_CHANNEL_ID))
-    channel = channel or member.guild.system_channel
-    if channel is None:
-        return
-    embed = discord.Embed(
-        title=f"Welcome to {member.guild.name}!",
-        description=f"Hey {member.mention}, glad you're here. Say hi to the community!",
-        color=discord.Color.blurple(),
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"Member #{member.guild.member_count}")
-    try:
-        await channel.send(embed=embed)
-    except discord.Forbidden:
-        log.warning("No permission to send welcome message in #%s", channel)
 
 
 # ---------- Shared embed builders ----------
@@ -88,6 +67,15 @@ def help_embed() -> discord.Embed:
         inline=False,
     )
     e.add_field(name="🔍 whohas <gear>", value="Find members who own a piece of gear", inline=False)
+    e.add_field(
+        name="📈 IEMRanking",
+        value=(
+            "`/iem <name>` — IEM/headphone profile: scores, rank, price, photo\n"
+            "`/iemtop [sort] [type] [price] [tuning] [brand]` — top lists (best bass, value…)\n"
+            "`/iemcompare <first> <second>` — head-to-head"
+        ),
+        inline=False,
+    )
     e.add_field(name="🐢 slowmode <seconds> [channel]", value="*Mods:* custom slowmode, any seconds (e.g. 3). 0 = off", inline=False)
     e.set_footer(text=f"Use /command or {PREFIX}command")
     return e

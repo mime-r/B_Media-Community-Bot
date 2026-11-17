@@ -1,6 +1,6 @@
 # B_Media Community Bot
 
-Simple Discord bot (discord.py) with slash + prefix commands and welcome messages.
+Simple Discord bot (discord.py) with slash + prefix commands.
 
 ## Commands
 | Slash | Prefix | What |
@@ -18,9 +18,13 @@ Simple Discord bot (discord.py) with slash + prefix commands and welcome message
 
 | `/slowmode <seconds> [channel]` | `!slowmode <seconds> [#channel]` | Mods only. Native Discord slowmode with any value 0–21600s (e.g. 3s, below the app's 5s preset) |
 
+| `/iem <name> [type]` | `!iem <name>` | IEMRanking profile: reviewer + user score, rank, launch price, photo. Autocomplete; dropdown to switch to other matches |
+| `/iemtop [sort] [type] [price] [tuning] [brand]` | — | Ranking lists (reviewer score, best bass, price-to-performance…), paged with ◀️ ▶️ |
+| `/iemcompare <first> <second>` | — | Two products side by side, winner per metric marked ✅ |
+
 Right-click a user → **Apps → View Setup** also works.
 
-Auto welcome embed when someone joins.
+IEMRanking commands need `IEMRANKING_API_KEY` set (env var / `.env`). Answers are cached 5 min to save quota; on rate limit the bot tells users when to retry.
 
 ## Data
 Setups are stored in `bmedia.db` (SQLite, created automatically next to `main.py`). Override location with `DB_PATH` env var. **Back this file up** — deleting it wipes all profiles.
@@ -41,6 +45,6 @@ python main.py
 ## 3. Deploy on Pella
 1. Create a new **Python** server on Pella.
 2. Upload `main.py`, `requirements.txt` and the `cogs/` folder (don't upload `.env` with a real token publicly).
-3. Set the token: add `DISCORD_TOKEN` in Pella's environment variables / `.env` file panel (plus optional `WELCOME_CHANNEL_ID`, `PREFIX`).
+3. Set the token: add `DISCORD_TOKEN` in Pella's environment variables / `.env` file panel (plus `IEMRANKING_API_KEY` and optional `PREFIX`).
 4. Set startup/main file to `main.py` and start. Pella installs `requirements.txt` automatically.
 5. Console should show `B_Media Community Bot online as ...`. Slash commands may take a minute to appear.
