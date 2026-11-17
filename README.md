@@ -18,9 +18,9 @@ Simple Discord bot (discord.py) with slash + prefix commands.
 
 | `/slowmode <seconds> [channel]` | `!slowmode <seconds> [#channel]` | Mods only. Native Discord slowmode with any value 0–21600s (e.g. 3s, below the app's 5s preset) |
 
-| `/iem <name> [type]` | `!iem <name>` | IEMRanking profile: reviewer + user score, rank, launch price, photo. Autocomplete; dropdown to switch to other matches |
-| `/iemtop [sort] [type] [price] [tuning] [brand]` | — | Ranking lists (reviewer score, best bass, price-to-performance…), paged with ◀️ ▶️ |
-| `/iemcompare <first> <second>` | — | Two products side by side, winner per metric marked ✅ |
+| `/search <name>` | `!search <name>` | IEMRanking profile: reviewer + user score, rank, launch price, photo. Autocomplete; dropdown to switch to other matches |
+| `/top [sort] [type] [price] [tuning] [brand]` | — | Ranking lists (reviewer score, best bass, price-to-performance…), paged with ◀️ ▶️ |
+| `/compare <first> <second>` | — | Two products side by side, winner per metric marked ✅ |
 
 Right-click a user → **Apps → View Setup** also works.
 

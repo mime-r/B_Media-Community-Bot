@@ -371,7 +371,7 @@ class ProfileView(discord.ui.View):
 
     async def on_select(self, interaction: discord.Interaction):
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("Only the person who searched can switch. Try `/iem` yourself!",
+            await interaction.response.send_message("Only the person who searched can switch. Try `/search` yourself!",
                                                     ephemeral=True)
             return
         index = int(interaction.data["values"][0])
@@ -445,7 +445,7 @@ class IEMRanking(commands.Cog):
         self.bot = bot
         self.api = IEMRankingAPI(API_KEY)
         if not API_KEY:
-            log.warning("IEMRANKING_API_KEY not set — /iem commands will reply with a setup notice")
+            log.warning("IEMRANKING_API_KEY not set — /search, /top, /compare will reply with a setup notice")
 
     async def cog_unload(self):
         await self.api.close()
@@ -487,17 +487,14 @@ class IEMRanking(commands.Cog):
             if isinstance(o, dict) and o.get("value") and (q in norm(str(o.get("label"))) or q in norm(str(o["value"])))
         ][:25]
 
-    # ----- /iem -----
+    # ----- /search -----
 
-    @app_commands.command(name="iem", description="Look up an IEM or headphone on IEMRanking.com")
-    @app_commands.describe(name="Product or brand name, e.g. Chu 2, Blessing 3, HD600",
-                           kind="Only IEMs or only over-ear headphones")
-    @app_commands.rename(kind="type")
-    @app_commands.choices(kind=KIND_CHOICES)
-    async def iem(self, interaction: discord.Interaction, name: str, kind: str = "all"):
+    @app_commands.command(name="search", description="Look up an IEM or headphone on IEMRanking.com")
+    @app_commands.describe(name="Product or brand name, e.g. Chu 2, Blessing 3, HD600")
+    async def search_cmd(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(thinking=True)
         try:
-            results, note = await self.find(name, kind)
+            results, note = await self.find(name)
         except APIError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -507,11 +504,11 @@ class IEMRanking(commands.Cog):
         view = ProfileView(interaction.user.id, results, note=note)
         view.message = await interaction.followup.send(embed=build_profile_embed(results[0], note), view=view)
 
-    iem.autocomplete("name")(product_autocomplete)
+    search_cmd.autocomplete("name")(product_autocomplete)
 
-    # ----- /iemtop -----
+    # ----- /top -----
 
-    @app_commands.command(name="iemtop", description="Top lists from IEMRanking.com (by score, bass, price…)")
+    @app_commands.command(name="top", description="Top IEM/headphone lists from IEMRanking.com (by score, bass, price…)")
     @app_commands.describe(
         sort="What to rank by",
         kind="IEMs or over-ear headphones",
@@ -525,7 +522,7 @@ class IEMRanking(commands.Cog):
         kind=KIND_CHOICES,
         price=[app_commands.Choice(name=label, value=value) for value, label in PRICES.items()],
     )
-    async def iemtop(self, interaction: discord.Interaction, sort: str = "reviewer-score", kind: str = "iem",
+    async def top(self, interaction: discord.Interaction, sort: str = "reviewer-score", kind: str = "iem",
                      price: str | None = None, tuning: str | None = None, brand: str | None = None):
         params = {"sort": sort, "type": kind, "price": price, "tuning": tuning, "limit": PAGE_SIZE,
                   "brand": ",".join(h for b in brand.split(",") if (h := handle(b))) if brand else None}
@@ -538,13 +535,13 @@ class IEMRanking(commands.Cog):
         view = RankingView(self.api, params, data)
         view.message = await interaction.followup.send(embed=build_ranking_embed(data), view=view)
 
-    iemtop.autocomplete("tuning")(tuning_autocomplete)
+    top.autocomplete("tuning")(tuning_autocomplete)
 
-    # ----- /iemcompare -----
+    # ----- /compare -----
 
-    @app_commands.command(name="iemcompare", description="Compare two IEMs/headphones side by side")
+    @app_commands.command(name="compare", description="Compare two IEMs/headphones side by side")
     @app_commands.describe(first="First product", second="Second product")
-    async def iemcompare(self, interaction: discord.Interaction, first: str, second: str):
+    async def compare(self, interaction: discord.Interaction, first: str, second: str):
         await interaction.response.defer(thinking=True)
         try:
             (ra, _), (rb, _) = await self.find(first), await self.find(second)
@@ -564,13 +561,13 @@ class IEMRanking(commands.Cog):
         view.add_item(link_button(clip(b["name"], 80), b["url"]))
         await interaction.followup.send(embed=build_compare_embed(a, b), view=view)
 
-    iemcompare.autocomplete("first")(product_autocomplete)
-    iemcompare.autocomplete("second")(product_autocomplete)
+    compare.autocomplete("first")(product_autocomplete)
+    compare.autocomplete("second")(product_autocomplete)
 
-    # ----- prefix: !iem <name> -----
+    # ----- prefix: !search <name> -----
 
-    @commands.command(name="iem")
-    async def prefix_iem(self, ctx: commands.Context, *, name: str):
+    @commands.command(name="search")
+    async def prefix_search(self, ctx: commands.Context, *, name: str):
         async with ctx.typing():
             try:
                 results, note = await self.find(name)

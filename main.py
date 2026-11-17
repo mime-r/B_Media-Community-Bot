@@ -70,9 +70,9 @@ def help_embed() -> discord.Embed:
     e.add_field(
         name="📈 IEMRanking",
         value=(
-            "`/iem <name>` — IEM/headphone profile: scores, rank, price, photo\n"
-            "`/iemtop [sort] [type] [price] [tuning] [brand]` — top lists (best bass, value…)\n"
-            "`/iemcompare <first> <second>` — head-to-head"
+            "`/search <name>` — IEM/headphone profile: scores, rank, price, photo\n"
+            "`/top [sort] [type] [price] [tuning] [brand]` — top lists (best bass, value…)\n"
+            "`/compare <first> <second>` — head-to-head"
         ),
         inline=False,
     )
