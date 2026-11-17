@@ -21,6 +21,7 @@ Simple Discord bot (discord.py) with slash + prefix commands.
 | `/search <name>` | `!search <name>` | IEMRanking profile: reviewer + user score, rank, launch price, photo. Autocomplete; dropdown to switch to other matches |
 | `/top [sort] [type] [price] [tuning] [brand]` | — | Ranking lists (reviewer score, best bass, price-to-performance…), paged with ◀️ ▶️ |
 | `/compare <first> <second>` | — | Two products side by side, winner per metric marked ✅ |
+| `/recommend` | — | Private questionnaire (type, budget, sound, priority) → top 5 picks, most suitable first. Share to channel or start over |
 
 Right-click a user → **Apps → View Setup** also works.
 

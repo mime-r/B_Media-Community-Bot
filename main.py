@@ -72,7 +72,8 @@ def help_embed() -> discord.Embed:
         value=(
             "`/search <name>` — IEM/headphone profile: scores, rank, price, photo\n"
             "`/top [sort] [type] [price] [tuning] [brand]` — top lists (best bass, value…)\n"
-            "`/compare <first> <second>` — head-to-head"
+            "`/compare <first> <second>` — head-to-head\n"
+            "`/recommend` — answer a few questions, get your top 5 picks"
         ),
         inline=False,
     )

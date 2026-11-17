@@ -28,6 +28,7 @@ CREDIT = "Data from IEMRanking.com"
 
 TYPE_LABEL = {"iem": "IEM", "headphone": "Headphone"}
 TYPE_PLURAL = {"iem": "IEMs", "headphone": "headphones"}
+TYPE_TITLE = {"iem": "IEMs", "headphone": "Headphones"}
 TYPE_EMOJI = {"iem": "👂", "headphone": "🎧"}
 
 SORTS = {
@@ -263,7 +264,7 @@ def build_ranking_embed(data: dict) -> discord.Embed:
             bits.append(f"{emoji} " + ", ".join(f[key]))
 
     e = discord.Embed(
-        title=f"🏆 {data.get('sort_label') or SORTS.get(sort, sort)} · {TYPE_PLURAL.get(kind, kind).capitalize()}",
+        title=f"🏆 {data.get('sort_label') or SORTS.get(sort, sort)} · {TYPE_TITLE.get(kind, kind)}",
         url=data.get("site_url"),
         color=discord.Color.from_rgb(200, 245, 60),  # IEMRanking lime
     )
@@ -434,6 +435,193 @@ class RankingView(discord.ui.View):
                 pass
 
 
+# ---------- Recommendations ----------
+
+# (sort, answer label, emoji, description, short metric label)
+PRIORITIES = [
+    ("reviewer-score", "Best all-rounder", "⭐", "Highest overall reviewer score", "Overall"),
+    ("price-to-performance", "Best value", "💸", "Most performance for the money", "Value"),
+    ("best-bass", "Bass", "🔊", "Impactful, high-quality low end", "Bass"),
+    ("best-mids", "Vocals & mids", "🎤", "Natural, clear vocals and instruments", "Mids"),
+    ("best-treble", "Treble & sparkle", "✨", "Airy, refined highs", "Treble"),
+    ("best-tonality", "Natural tonality", "🎼", "Balanced, correct-sounding overall tuning", "Tonality"),
+    ("best-details", "Detail & resolution", "🔬", "Hear every little thing", "Detail"),
+    ("best-soundstage", "Soundstage & imaging", "🌌", "Wide, spacious, precise placement", "Soundstage"),
+    ("gaming-score", "Gaming", "🎮", "Footsteps, positioning, competitive play", "Gaming"),
+]
+PRIORITY_INFO = {p[0]: p for p in PRIORITIES}
+PICKS = 5
+# Sorts where we re-rank candidates by our own fit score (others keep the site's order)
+REFIT_SORTS = {"reviewer-score", "gaming-score"} | {p[0] for p in PRIORITIES if p[0].startswith("best-")}
+
+
+def tuning_options(filters: dict) -> list[tuple[str, str]]:
+    """(value, label) pairs of tuning handles from /filters."""
+    opts = filters.get("tuning") or (filters.get("filters") or {}).get("tuning") or []
+    return [(str(o["value"]), str(o.get("label") or o["value"])) for o in opts if isinstance(o, dict) and o.get("value")]
+
+
+def fit_score(item: dict) -> float:
+    """Blend the focus score with the overall score; discount products with few reviews."""
+    overall = item.get("score") or 0.0
+    focus = item.get("sort_value")
+    quality = 0.65 * focus + 0.35 * overall if focus is not None else overall
+    confidence = min(1.0, 0.85 + 0.03 * (item.get("review_count") or 0))
+    return quality * confidence
+
+
+async def get_picks(api: IEMRankingAPI, kind: str, prices: list[str], tunings: list[str],
+                    sort: str) -> list[tuple[dict, bool]]:
+    """Up to PICKS (item, outside_tuning) pairs, most suitable first. At most 2 API calls."""
+    base = {"sort": sort, "type": kind, "price": ",".join(prices) or None, "limit": 25}
+    data = await api.ranking(**base, tuning=",".join(tunings) or None)
+    strict = data.get("results") or []
+    relaxed = []
+    if tunings and len(strict) < PICKS:  # too few with that tuning → top up, flagged
+        seen = {it["url"] for it in strict}
+        relaxed = [it for it in (await api.ranking(**base)).get("results") or [] if it["url"] not in seen]
+    if sort in REFIT_SORTS:
+        strict = sorted(strict, key=fit_score, reverse=True)
+        relaxed = sorted(relaxed, key=fit_score, reverse=True)
+    return ([(it, False) for it in strict] + [(it, True) for it in relaxed])[:PICKS]
+
+
+def answers_line(kind: str, prices: list[str], tunings: list[str], sort: str, tuning_labels: dict) -> str:
+    _, label, emoji, *_ = PRIORITY_INFO[sort]
+    parts = [
+        f"{TYPE_EMOJI[kind]} {TYPE_TITLE[kind]}",
+        "💰 " + (", ".join(PRICES[p] for p in prices) if prices else "Any budget"),
+        "🎚️ " + (", ".join(tuning_labels.get(t, t) for t in tunings) if tunings else "Any sound"),
+        f"{emoji} {label}",
+    ]
+    return " · ".join(parts)
+
+
+def build_recommend_panel() -> discord.Embed:
+    e = discord.Embed(
+        title="🎯 Find your next IEM",
+        description=(
+            "Answer the questions below, then hit **Get my picks**.\n"
+            "Skip any question for *no preference*.\n\n"
+            "**1.** IEMs or over-ear headphones?\n"
+            "**2.** What's your budget? *(pick one or more)*\n"
+            "**3.** What sound do you like? *(pick one or more)*\n"
+            "**4.** What matters most to you?"
+        ),
+        color=discord.Color.from_rgb(200, 245, 60),
+    )
+    e.set_footer(text=CREDIT)
+    return e
+
+
+def build_picks_embed(picks: list[tuple[dict, bool]], summary: str, sort: str) -> discord.Embed:
+    metric = PRIORITY_INFO[sort][4]
+    e = discord.Embed(title="🎯 Your top picks", color=discord.Color.from_rgb(200, 245, 60))
+    if not picks:
+        e.description = f"{summary}\n\nNothing matches all of that. Try a wider budget or fewer sound picks."
+        e.set_footer(text=CREDIT)
+        return e
+    e.description = f"{summary}\n\n*Most suitable first.*"
+    for i, (item, outside) in enumerate(picks, 1):
+        lead = MEDALS.get(i, f"`#{i}`")
+        lines = []
+        if item.get("sort_value") is not None:
+            lines.append(f"🎯 {metric} **{fmt_score(item['sort_value'])}** · ⭐ {fmt_score(item.get('score'))} overall")
+        else:
+            lines.append(f"⭐ **{fmt_score(item.get('score'))}** / 10 overall {bar(item.get('score'), 8)}")
+        lines.append(f"📝 {plural(item.get('review_count') or 0, 'review')} · 💰 {fmt_price(item.get('msrp_usd'))}"
+                     f" · [Read reviews ↗]({item['url']})")
+        if outside:
+            lines.append("*↪ Outside your sound picks (not enough exact matches)*")
+        e.add_field(name=f"{lead} {clip(item['name'], 80)}", value="\n".join(lines), inline=False)
+    if picks[0][0].get("image_url"):
+        e.set_thumbnail(url=picks[0][0]["image_url"])
+    e.set_footer(text=f"{CREDIT} · Picks are a starting point, read the reviews!")
+    return e
+
+
+class RecommendView(discord.ui.View):
+    """Private questionnaire: 4 dropdowns + a button. Lives on an ephemeral message."""
+
+    def __init__(self, api: IEMRankingAPI, tunings: list[tuple[str, str]]):
+        super().__init__(timeout=600)
+        self.api, self.tunings = api, tunings
+        self.kind, self.prices, self.tuning, self.sort = "iem", [], [], "reviewer-score"
+
+        self._select("1️⃣ IEMs or headphones?", "kind", [
+            discord.SelectOption(label="IEMs", value="iem", emoji="👂", default=True),
+            discord.SelectOption(label="Over-ear headphones", value="headphone", emoji="🎧"),
+        ])
+        self._select("2️⃣ Budget? (any if none picked)", "prices", [
+            discord.SelectOption(label=label, value=value) for value, label in PRICES.items()
+        ], multi=True)
+        if tunings:
+            self._select("3️⃣ Sound you like? (any if none picked)", "tuning", [
+                discord.SelectOption(label=clip(label, 100), value=value) for value, label in tunings[:25]
+            ], multi=True)
+        self._select("4️⃣ What matters most?", "sort", [
+            discord.SelectOption(label=label, value=sort, emoji=emoji, description=desc, default=sort == self.sort)
+            for sort, label, emoji, desc, _ in PRIORITIES
+        ])
+        go = discord.ui.Button(label="Get my picks", emoji="🎯", style=discord.ButtonStyle.success)
+        go.callback = self.on_go
+        self.add_item(go)
+
+    def _select(self, placeholder: str, attr: str, options: list[discord.SelectOption], multi: bool = False):
+        select = discord.ui.Select(placeholder=placeholder, options=options,
+                                   min_values=0 if multi else 1, max_values=len(options) if multi else 1)
+
+        async def callback(interaction: discord.Interaction):
+            values = select.values
+            setattr(self, attr, values if multi else values[0])
+            for opt in select.options:  # keep choices visible if the message is re-rendered
+                opt.default = opt.value in values
+            await interaction.response.defer()
+
+        select.callback = callback
+        self.add_item(select)
+
+    async def on_go(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        prices = [] if len(self.prices) == len(PRICES) else self.prices
+        try:
+            picks = await get_picks(self.api, self.kind, prices, self.tuning, self.sort)
+        except APIError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        summary = answers_line(self.kind, prices, self.tuning, self.sort, dict(self.tunings))
+        embed = build_picks_embed(picks, summary, self.sort)
+        self.stop()
+        await interaction.edit_original_response(embed=embed, view=PicksView(self.api, self.tunings, embed, picks))
+
+
+class PicksView(discord.ui.View):
+    """Under the private results: links to each pick, share publicly, or start over."""
+
+    def __init__(self, api: IEMRankingAPI, tunings: list[tuple[str, str]], embed: discord.Embed,
+                 picks: list[tuple[dict, bool]]):
+        super().__init__(timeout=600)
+        self.api, self.tunings, self.embed = api, tunings, embed
+        for i, (item, _) in enumerate(picks, 1):
+            self.add_item(discord.ui.Button(label=clip(f"{i}. {item['name']}", 80), url=item["url"], row=0))
+        if picks:
+            share = discord.ui.Button(label="Share to channel", emoji="📢", style=discord.ButtonStyle.primary, row=1)
+            share.callback = self.on_share
+            self.add_item(share)
+        again = discord.ui.Button(label="Start over", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
+        again.callback = self.on_again
+        self.add_item(again)
+
+    async def on_share(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(content="📢 Shared to the channel!", view=None)
+        await interaction.followup.send(content=f"🎯 {interaction.user.mention}'s picks", embed=self.embed,
+                                        allowed_mentions=discord.AllowedMentions.none())
+
+    async def on_again(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(content=None, embed=build_recommend_panel(),
+                                                view=RecommendView(self.api, self.tunings))
+
+
 # ---------- Cog ----------
 
 KindChoice = app_commands.Choice[str]
@@ -445,7 +633,7 @@ class IEMRanking(commands.Cog):
         self.bot = bot
         self.api = IEMRankingAPI(API_KEY)
         if not API_KEY:
-            log.warning("IEMRANKING_API_KEY not set — /search, /top, /compare will reply with a setup notice")
+            log.warning("IEMRANKING_API_KEY not set — /search, /top, /compare, /recommend will reply with a setup notice")
 
     async def cog_unload(self):
         await self.api.close()
@@ -479,13 +667,27 @@ class IEMRanking(commands.Cog):
             data = await self.api.filters()
         except APIError:
             return []
-        options = data.get("tuning") or (data.get("filters") or {}).get("tuning") or []
         q = norm(current)
         return [
-            app_commands.Choice(name=clip(str(o.get("label") or o.get("value")), 100), value=str(o["value"]))
-            for o in options
-            if isinstance(o, dict) and o.get("value") and (q in norm(str(o.get("label"))) or q in norm(str(o["value"])))
+            app_commands.Choice(name=clip(label, 100), value=value)
+            for value, label in tuning_options(data)
+            if q in norm(label) or q in norm(value)
         ][:25]
+
+    # ----- /recommend -----
+
+    @app_commands.command(name="recommend", description="Answer a few questions, get IEM/headphone picks that suit you")
+    async def recommend(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            tunings = tuning_options(await self.api.filters())
+        except APIError as exc:
+            if not self.api.key:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            tunings = []  # still works, just without the sound question
+        await interaction.followup.send(embed=build_recommend_panel(), view=RecommendView(self.api, tunings),
+                                        ephemeral=True)
 
     # ----- /search -----
 
