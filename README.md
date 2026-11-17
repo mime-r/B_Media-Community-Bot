@@ -27,6 +27,11 @@ Right-click a user → **Apps → View Setup** also works.
 
 IEMRanking commands need `IEMRANKING_API_KEY` set (env var / `.env`). Answers are cached 5 min to save quota; on rate limit the bot tells users when to retry.
 
+Rate limits (tune at the top of `cogs/iemranking.py`):
+- **Per user:** 4 uses/minute and 30/hour across `/search`, `!search`, `/top` (+ new pages), `/compare` and *Get my picks*. Members with **Manage Server** are exempt.
+- **Autocomplete:** cached suggestions are free; new lookups capped at 15/min per user and paused when the bot is busy or the key's quota runs low.
+- **Bot-wide:** at most `IEMRANKING_MAX_PER_MINUTE` (default 20) real API calls per minute. When the API reports ≤5 requests left, autocomplete pauses so commands get the rest.
+
 ## Data
 Setups are stored in `bmedia.db` (SQLite, created automatically next to `main.py`). Override location with `DB_PATH` env var. **Back this file up** — deleting it wipes all profiles.
 

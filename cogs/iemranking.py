@@ -9,6 +9,7 @@ import math
 import os
 import re
 import time
+from collections import deque
 
 import aiohttp
 import discord
@@ -63,8 +64,84 @@ PRICES = {
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
+# ----- Rate limits -----
+# Per user, shared by every IEMRanking action that can call the API
+# (/search, !search, /top + page flips, /compare, "Get my picks"). Members with Manage Server are exempt.
+USER_LIMITS = ((4, 60), (30, 3600))      # (max uses, per seconds): 4/minute and 30/hour
+AUTOCOMPLETE_LIMITS = ((15, 60),)         # uncached autocomplete lookups per user
+# Bot-wide cap on real (uncached) API calls. Set it a bit under your key's per-minute limit.
+API_MAX_PER_MINUTE = int(os.getenv("IEMRANKING_MAX_PER_MINUTE", "20"))
+API_RESERVE = 5        # when the API says this few requests are left, autocomplete stops (commands keep the rest)
+LOW_BUDGET_SECONDS = 60
+
+
 class APIError(Exception):
     """Error with a message that is safe to show to users."""
+
+
+class SlidingLimit:
+    """Sliding-window limiter with one or more (max, seconds) windows per key."""
+
+    def __init__(self, *windows: tuple[int, int]):
+        self.windows = windows
+        self.longest = max(s for _, s in windows)
+        self.hits: dict[int, deque[float]] = {}
+
+    def retry_after(self, key: int) -> float:
+        """Seconds until `key` may act again (0 = allowed now)."""
+        q = self.hits.get(key)
+        if not q:
+            return 0.0
+        now = time.monotonic()
+        while q and now - q[0] >= self.longest:
+            q.popleft()
+        wait = 0.0
+        for limit, seconds in self.windows:
+            recent = [t for t in q if now - t < seconds]
+            if len(recent) >= limit:
+                wait = max(wait, recent[-limit] + seconds - now)
+        return wait
+
+    def hit(self, key: int):
+        self.hits.setdefault(key, deque()).append(time.monotonic())
+        if len(self.hits) > 1000:  # drop idle users
+            now = time.monotonic()
+            self.hits = {k: q for k, q in self.hits.items() if q and now - q[-1] < self.longest}
+
+    def try_hit(self, key: int) -> float:
+        """Record a use if allowed; return 0 on success, else seconds to wait."""
+        wait = self.retry_after(key)
+        if wait <= 0:
+            self.hit(key)
+        return wait
+
+
+user_limit = SlidingLimit(*USER_LIMITS)
+autocomplete_limit = SlidingLimit(*AUTOCOMPLETE_LIMITS)
+
+
+def is_exempt(user: discord.abc.User) -> bool:
+    perms = getattr(user, "guild_permissions", None)
+    return bool(perms and perms.manage_guild)
+
+
+def slow_down_message(wait: float) -> str:
+    return f"⏳ Easy there! You can use IEMRanking commands again <t:{int(time.time() + wait) + 1}:R>."
+
+
+async def gate(interaction: discord.Interaction) -> bool:
+    """Count one use for this user; if over the limit, tell them privately and return False."""
+    if is_exempt(interaction.user):
+        return True
+    wait = user_limit.try_hit(interaction.user.id)
+    if wait <= 0:
+        return True
+    msg = slow_down_message(wait)
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+    return False
 
 
 # ---------- API client ----------
@@ -75,6 +152,25 @@ class IEMRankingAPI:
         self.session: aiohttp.ClientSession | None = None
         self.cache: dict[tuple, tuple[float, dict]] = {}
         self.blocked_until = 0.0  # set from Retry-After on 429
+        self.low_until = 0.0      # set when X-RateLimit-Remaining gets close to 0
+        self.outgoing = SlidingLimit((API_MAX_PER_MINUTE, 60))
+
+    @staticmethod
+    def _key(endpoint: str, params: dict) -> tuple[tuple, dict]:
+        params = {k: str(v) for k, v in params.items() if v not in (None, "")}
+        return (endpoint, tuple(sorted(params.items()))), params
+
+    def peek(self, endpoint: str, **params) -> dict | None:
+        """Cached answer or None. Never calls the API."""
+        hit = self.cache.get(self._key(endpoint, params)[0])
+        return hit[1] if hit and hit[0] > time.monotonic() else None
+
+    def can_background(self) -> bool:
+        """Spare capacity for nice-to-haves (autocomplete): not low on quota, under half the bot-wide cap."""
+        now = time.monotonic()
+        if self.low_until > now or self.blocked_until > now:
+            return False
+        return self.outgoing.retry_after(0) <= 0 and len(self.outgoing.hits.get(0, ())) < API_MAX_PER_MINUTE // 2
 
     async def close(self):
         if self.session and not self.session.closed:
@@ -91,20 +187,26 @@ class IEMRankingAPI:
     async def get(self, endpoint: str, ttl: int = CACHE_TTL, **params) -> dict:
         if not self.key:
             raise APIError("IEMRanking isn't set up yet (missing `IEMRANKING_API_KEY`).")
-        params = {k: str(v) for k, v in params.items() if v not in (None, "")}
-        cache_key = (endpoint, tuple(sorted(params.items())))
+        cache_key, params = self._key(endpoint, params)
         now = time.monotonic()
         if (hit := self.cache.get(cache_key)) and hit[0] > now:
             return hit[1]
         if self.blocked_until > now:
-            raise APIError(f"⏳ IEMRanking rate limit hit. Try again <t:{int(time.time() + self.blocked_until - now)}:R>.")
+            raise APIError(f"⏳ IEMRanking is busy. Try again <t:{int(time.time() + self.blocked_until - now) + 1}:R>.")
+        if (wait := self.outgoing.try_hit(0)) > 0:
+            raise APIError(f"⏳ Lots of lookups right now. Try again <t:{int(time.time() + wait) + 1}:R>.")
 
         try:
             async with self._session().get(API_BASE + endpoint, params=params) as resp:
                 if resp.status == 429:
                     retry = int(resp.headers.get("Retry-After", "60") or 60)
                     self.blocked_until = now + retry
-                    raise APIError(f"⏳ IEMRanking rate limit hit. Try again <t:{int(time.time()) + retry}:R>.")
+                    log.warning("IEMRanking 429: blocked for %ss", retry)
+                    raise APIError(f"⏳ IEMRanking is busy. Try again <t:{int(time.time()) + retry}:R>.")
+                remaining = resp.headers.get("X-RateLimit-Remaining", "")
+                if remaining.isdigit() and int(remaining) <= API_RESERVE:
+                    self.low_until = now + LOW_BUDGET_SECONDS
+                    log.info("IEMRanking quota low (%s left): autocomplete paused", remaining)
                 if resp.content_type != "application/json":
                     # HTML = request stopped before reaching the API (e.g. Cloudflare)
                     log.warning("IEMRanking returned non-JSON (HTTP %s) for %s", resp.status, endpoint)
@@ -414,7 +516,10 @@ class RankingView(discord.ui.View):
 
     def _pager(self, step: int):
         async def callback(interaction: discord.Interaction):
-            offset = max(0, self.data.get("offset", 0) + step)
+            offset = max(0, self.data.get("offset", 0) + step) or None  # page 1 = same cache key as the command
+            # Flipping back to an already-seen page is free; new pages count as a use
+            if self.api.peek("ranking", **self.params, offset=offset) is None and not await gate(interaction):
+                return
             try:
                 data = await self.api.ranking(**self.params, offset=offset)
             except APIError as exc:
@@ -582,6 +687,8 @@ class RecommendView(discord.ui.View):
         self.add_item(select)
 
     async def on_go(self, interaction: discord.Interaction):
+        if not await gate(interaction):
+            return
         await interaction.response.defer()
         prices = [] if len(self.prices) == len(PRICES) else self.prices
         try:
@@ -649,13 +756,21 @@ class IEMRanking(commands.Cog):
 
     # ----- autocomplete (cached; silent on errors so typing never breaks) -----
 
-    async def product_autocomplete(self, _interaction: discord.Interaction, current: str):
+    async def product_autocomplete(self, interaction: discord.Interaction, current: str):
         if len(norm(current)) < 3:
             return []
-        try:
-            data = await self.api.search(clip(current.strip(), 100), "all", 10)
-        except APIError:
-            return []
+        query = clip(current.strip(), 100)
+        data = self.api.peek("search", q=query, type="all", limit=10)
+        if data is None:
+            # Uncached: only when the bot has spare quota and this user isn't hammering it
+            if not self.api.can_background():
+                return []
+            if not is_exempt(interaction.user) and autocomplete_limit.try_hit(interaction.user.id) > 0:
+                return []
+            try:
+                data = await self.api.search(query, "all", 10)
+            except APIError:
+                return []
         return [
             app_commands.Choice(name=clip(f"{r['name']} · ⭐ {fmt_score(r.get('score'))}", 100),
                                 value=clip(r["name"], 100))
@@ -694,6 +809,8 @@ class IEMRanking(commands.Cog):
     @app_commands.command(name="search", description="Look up an IEM or headphone on IEMRanking.com")
     @app_commands.describe(name="Product or brand name, e.g. Chu 2, Blessing 3, HD600")
     async def search_cmd(self, interaction: discord.Interaction, name: str):
+        if not await gate(interaction):
+            return
         await interaction.response.defer(thinking=True)
         try:
             results, note = await self.find(name)
@@ -728,6 +845,8 @@ class IEMRanking(commands.Cog):
                      price: str | None = None, tuning: str | None = None, brand: str | None = None):
         params = {"sort": sort, "type": kind, "price": price, "tuning": tuning, "limit": PAGE_SIZE,
                   "brand": ",".join(h for b in brand.split(",") if (h := handle(b))) if brand else None}
+        if not await gate(interaction):
+            return
         await interaction.response.defer(thinking=True)
         try:
             data = await self.api.ranking(**params)
@@ -744,6 +863,8 @@ class IEMRanking(commands.Cog):
     @app_commands.command(name="compare", description="Compare two IEMs/headphones side by side")
     @app_commands.describe(first="First product", second="Second product")
     async def compare(self, interaction: discord.Interaction, first: str, second: str):
+        if not await gate(interaction):
+            return
         await interaction.response.defer(thinking=True)
         try:
             (ra, _), (rb, _) = await self.find(first), await self.find(second)
@@ -770,6 +891,9 @@ class IEMRanking(commands.Cog):
 
     @commands.command(name="search")
     async def prefix_search(self, ctx: commands.Context, *, name: str):
+        if not is_exempt(ctx.author) and (wait := user_limit.try_hit(ctx.author.id)) > 0:
+            await ctx.send(f"{ctx.author.mention} {slow_down_message(wait)}", delete_after=10)
+            return
         async with ctx.typing():
             try:
                 results, note = await self.find(name)
