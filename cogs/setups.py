@@ -1,5 +1,6 @@
 """Setup profiles + gear-owner lookup for B_Media Community Bot."""
 
+import logging
 import os
 import re
 import sqlite3
@@ -10,10 +11,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+log = logging.getLogger("B_Media Community Bot")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.getenv("DB_PATH", os.path.join(ROOT, "bmedia.db"))
 
-GOLD = discord.Color.from_rgb(212, 175, 55)
+from cogs.style import GOLD, brand_footer
 
 # (key, label, emoji, placeholder, paragraph?, max_length)
 # Convention: every list-type field is a paragraph input, one item per line
@@ -134,6 +137,9 @@ class SetupDB:
         )
         self.conn.commit()
 
+    def count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM setups").fetchone()[0]
+
     def delete(self, user_id: int) -> bool:
         cur = self.conn.execute("DELETE FROM setups WHERE user_id = ?", (user_id,))
         self.conn.commit()
@@ -207,19 +213,26 @@ def build_setup_embed(member: discord.abc.User, row: dict) -> discord.Embed:
         e.description = (summary + "\n\n" if summary else "") + "*No gear listed yet.*"
     if row.get("updated_at"):
         e.timestamp = datetime.fromtimestamp(row["updated_at"], tz=timezone.utc)
-        e.set_footer(text="B_Media Community • Last updated")
+        brand_footer(e, "Last updated")
     else:
-        e.set_footer(text="B_Media Community")
+        brand_footer(e)
     return e
 
 
 def no_setup_embed(member: discord.abc.User, is_self: bool) -> discord.Embed:
-    msg = (
-        "You haven't shared your setup yet.\nUse **/setup edit** to add your gear!"
-        if is_self
-        else f"{member.mention} hasn't shared their setup yet."
-    )
-    return discord.Embed(description=f"🎧 {msg}", color=GOLD)
+    if is_self:
+        e = discord.Embed(
+            title="🎧 No setup yet",
+            description="Show the community what you listen on: source, DAC, amp, headphones, IEMs and more.\n"
+                        "Hit **Create my setup** below, or use **/setup edit** anytime.",
+            color=GOLD,
+        )
+    else:
+        e = discord.Embed(
+            description=f"🎧 {member.mention} hasn't shared their setup yet.\nGot gear? Add yours with **/setup edit**.",
+            color=GOLD,
+        )
+    return brand_footer(e)
 
 
 def build_whohas_embed(guild: discord.Guild, query: str, rows: list[dict]) -> discord.Embed:
@@ -240,7 +253,7 @@ def build_whohas_embed(guild: discord.Guild, query: str, rows: list[dict]) -> di
     e = discord.Embed(title=f"🔍 Who has “{clip(query, 50)}”?", color=GOLD)
     if not entries:
         e.description = "Nobody here has listed that yet.\nOwn it? Add it with **/setup edit**."
-        return e
+        return brand_footer(e)
 
     shown, length = [], 0
     for _, line in entries:
@@ -248,13 +261,12 @@ def build_whohas_embed(guild: discord.Guild, query: str, rows: list[dict]) -> di
             break
         shown.append(line)
         length += len(line) + 1
-    e.description = "\n".join(shown)
-    extra = len(entries) - len(shown)
-    footer = f"{len(entries)} member{'s' if len(entries) != 1 else ''} • Ask them for impressions!"
-    if extra:
-        footer = f"Showing {len(shown)} of {len(entries)} members • Try a more specific search"
-    e.set_footer(text=footer)
-    return e
+    n = len(entries)
+    header = f"**{n} member{'s' if n != 1 else ''}** listed gear matching `{clip(query, 40)}`"
+    e.description = header + "\n\n" + "\n".join(shown)
+    if n > len(shown):
+        return brand_footer(e, f"Showing {len(shown)} of {n} · Try a more specific search")
+    return brand_footer(e, "Ask them for impressions!")
 
 
 # ---------- UI ----------
@@ -357,6 +369,36 @@ class EditPanel(discord.ui.View):
         return callback
 
 
+def edit_panel_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="🛠️ Edit your setup",
+        description="Pick a section to edit. Put **one item per line**.\nYou can come back and edit any section anytime.",
+        color=GOLD,
+    )
+    return brand_footer(e)
+
+
+class CreateSetupView(discord.ui.View):
+    """Under 'no setup yet': opens the private edit panel for whoever clicks."""
+
+    def __init__(self, db: SetupDB):
+        super().__init__(timeout=600)
+        self.db = db
+
+    @discord.ui.button(label="Create my setup", emoji="🛠️", style=discord.ButtonStyle.success)
+    async def create(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_message(embed=edit_panel_embed(), view=EditPanel(self.db), ephemeral=True)
+
+
+def no_setup_kwargs(db: SetupDB, member: discord.abc.User, viewer: discord.abc.User) -> dict:
+    """Embed (+ create button when it's your own) for 'no setup' replies."""
+    is_self = member.id == viewer.id
+    kwargs = {"embed": no_setup_embed(member, is_self)}
+    if is_self:
+        kwargs["view"] = CreateSetupView(db)
+    return kwargs
+
+
 class ConfirmClear(discord.ui.View):
     def __init__(self, db: SetupDB, user_id: int):
         super().__init__(timeout=60)
@@ -397,7 +439,7 @@ class Setups(commands.Cog):
         row = self.db.get(member.id)
         if row is None:
             await interaction.response.send_message(
-                embed=no_setup_embed(member, member == interaction.user), ephemeral=True
+                **no_setup_kwargs(self.db, member, interaction.user), ephemeral=True
             )
             return
         if msg := cooldown_message(interaction.user.id):
@@ -409,12 +451,7 @@ class Setups(commands.Cog):
     # /setup edit
     @setup_group.command(name="edit", description="Add or edit your gear")
     async def setup_edit(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="🛠️ Edit your setup",
-            description="Pick a section to edit. Put **one item per line**.\nYou can come back and edit any section anytime.",
-            color=GOLD,
-        )
-        await interaction.response.send_message(embed=embed, view=EditPanel(self.db), ephemeral=True)
+        await interaction.response.send_message(embed=edit_panel_embed(), view=EditPanel(self.db), ephemeral=True)
 
     # /setup clear
     @setup_group.command(name="clear", description="Delete your setup profile")
@@ -428,12 +465,26 @@ class Setups(commands.Cog):
             ephemeral=True,
         )
 
+    # /setup remove (mods) — Discord can't hide a single group subcommand, so check at runtime
+    @setup_group.command(name="remove", description="Mods: delete someone's setup profile")
+    @app_commands.describe(user="Member to remove (or paste a user ID if they left the server)")
+    @app_commands.guild_only()
+    async def setup_remove(self, interaction: discord.Interaction, user: discord.User):
+        if not interaction.permissions.manage_guild:
+            await interaction.response.send_message("You need **Manage Server** to remove other people's setups.", ephemeral=True)
+            return
+        if not self.db.delete(user.id):
+            await interaction.response.send_message(f"{user.mention} has no setup saved.", ephemeral=True)
+            return
+        log.info("Setup of %s (%s) removed by %s (%s)", user, user.id, interaction.user, interaction.user.id)
+        await interaction.response.send_message(f"🗑️ Removed {user.mention}'s setup.", ephemeral=True)
+
     # Right-click user → Apps → View Setup
     async def view_setup_menu(self, interaction: discord.Interaction, member: discord.Member):
         row = self.db.get(member.id)
         if row is None:
             await interaction.response.send_message(
-                embed=no_setup_embed(member, member == interaction.user), ephemeral=True
+                **no_setup_kwargs(self.db, member, interaction.user), ephemeral=True
             )
             return
         await send_setup(interaction, self.db, member, row, shareable=True, ephemeral=True)
@@ -468,7 +519,7 @@ class Setups(commands.Cog):
         member = member or ctx.author
         row = self.db.get(member.id)
         if row is None:
-            await ctx.send(embed=no_setup_embed(member, member == ctx.author))
+            await ctx.send(**no_setup_kwargs(self.db, member, ctx.author))
             return
         if msg := cooldown_message(ctx.author.id):
             await ctx.send(f"{ctx.author.mention} {msg}", delete_after=10)  # auto-clean to avoid clutter

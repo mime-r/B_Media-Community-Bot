@@ -6,15 +6,21 @@ This policy explains what data B_Media Community Bot ("the bot", "we") collects,
 
 ## 1. Data we store
 
-The bot only keeps data permanently when you choose to save a setup profile.
+The bot keeps data permanently only when you save a setup, play a game, or when a moderator takes action on you.
 
 | Data | When | Why |
 |---|---|---|
 | Your Discord user ID | You use `/setup edit` | To link the profile to you |
 | Setup fields you type in (source/DAC/amp, headphones/IEMs/speakers, accessories, genres, notes) | You use `/setup edit` | To show your setup with `/setup view` and let others find it with `/whohas` |
 | Time of last update | You save a setup | To show when the profile was last changed |
+| IEMdle guesses and results (which IEMs you guessed each day, solved or not) | You use `/iemdle guess` | To show your board, streak and stats |
+| World Cup votes (which product you voted for in each match) | You press a vote button | To count votes and award prediction points |
+| Game points per server | You score in IEMdle or World Cup | To show `/leaderboard` |
+| Moderation cases: your user ID and username, the moderator's ID and username, the action (warn/kick/ban/mute…), reason, duration, time, and whether the DM reached you | A moderator uses a moderation command on you | So server staff can review a member's history with `/cases` |
 
 This data is stored in a database on the bot's hosting server.
+
+For each server, the bot also stores moderation settings chosen by server admins: the server ID, the mod log channel ID and the IDs of moderator roles. It also stores World Cup events (name, channel, entrants), which are not personal data.
 
 ## 2. Data we process but do not store
 
@@ -22,12 +28,13 @@ This data is stored in a database on the bot's hosting server.
 - **Server and member info:** Commands like `/serverinfo`, `/userinfo` and `/whohas` read info Discord already provides (names, avatars, roles, join dates) to build a reply. This is not saved.
 - **Rate limits and cooldowns:** Your user ID and usage count are kept in memory for up to one hour to stop spam. They are cleared when the bot restarts.
 - **Cached results:** IEMRanking search results are kept in memory for about 5 minutes to reduce API use. These contain product data, not personal data.
+- **Moderation notices:** When a moderator acts on someone, the bot DMs that person the reason and posts the case in the server's private mod log channel. Discord also records the action in the server's Audit Log. Those Discord copies are controlled by the server's staff.
 - **Error logs:** If a command fails, technical error details may be written to the host's console logs for debugging.
 
 ## 3. Third parties
 
 - **Discord** — the bot runs on Discord. Discord's own [Privacy Policy](https://discord.com/privacy) applies to your use of Discord.
-- **IEMRanking** — when you use `/search`, `/top`, `/compare` or `/recommend`, your search terms and filters are sent to the IEMRanking API to get results. Your Discord identity is not sent.
+- **IEMRanking** — when you use `/search`, `/top`, `/compare`, `/recommend` or `/upgrade`, your search terms and filters are sent to the IEMRanking API to get results (for `/upgrade` without a product, that includes an IEM/headphone name from your setup). Your Discord identity is not sent.
 - **Hosting provider** — the bot and its database run on a third-party hosting service.
 
 We do not sell, rent or share your data with anyone else, and we do not use it for advertising.
@@ -36,15 +43,19 @@ We do not sell, rent or share your data with anyone else, and we do not use it f
 
 Setup profiles are public inside servers where the bot is present: any member can view your setup with `/setup view` or find you with `/whohas`. Don't put anything in your setup you wouldn't want other members to see.
 
+IEMdle guesses are private to you unless you press **Share result**, which posts only a coloured grid (no product names). Leaderboard points are visible to members of that server. World Cup vote counts are public, but who voted for what is not shown. Moderation cases are visible only to that server's moderators.
+
 ## 5. How long we keep it
 
-Your setup is kept until you delete it, or until the bot is shut down and its database removed.
+- **Setup:** until you delete it, a server moderator removes it (e.g. for breaking the rules, or after you leave), or the bot is shut down and its database removed.
+- **Game data:** until you ask us to delete it, or the bot is shut down.
+- **Moderation cases:** until that server's staff delete them with `/case delete`, or the bot is shut down. Each server decides how long to keep its own records.
 
 ## 6. Your choices
 
 - **Delete your data:** run `/setup clear` at any time. Your profile is removed from the database straight away.
 - **Change your data:** run `/setup edit` to update any field.
-- **Ask us:** contact us (see below) to request a copy of your stored data or ask us to delete it.
+- **Ask us:** contact us (see below) to request a copy of your stored data, or to delete your game data. For moderation cases, contact that server's staff; they decide whether to remove them.
 
 ## 7. Children
 

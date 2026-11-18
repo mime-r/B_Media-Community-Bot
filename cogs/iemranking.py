@@ -16,6 +16,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.style import LIME
+
 log = logging.getLogger("B_Media Community Bot")
 
 API_BASE = "https://www.iemranking.com/api/v1/"
@@ -368,7 +370,7 @@ def build_ranking_embed(data: dict) -> discord.Embed:
     e = discord.Embed(
         title=f"🏆 {data.get('sort_label') or SORTS.get(sort, sort)} · {TYPE_TITLE.get(kind, kind)}",
         url=data.get("site_url"),
-        color=discord.Color.from_rgb(200, 245, 60),  # IEMRanking lime
+        color=LIME,
     )
     results = data.get("results") or []
     if not results:
@@ -415,7 +417,7 @@ def build_compare_embed(a: dict, b: dict) -> discord.Embed:
             f"[Read reviews ↗]({item['url']})"
         )
 
-    e = discord.Embed(title="⚔️ Head to head", color=discord.Color.from_rgb(200, 245, 60))
+    e = discord.Embed(title="⚔️ Head to head", color=LIME)
     e.add_field(name=f"{TYPE_EMOJI.get(a.get('type'), '🎧')} {clip(a['name'], 60)}", value=column(a, sa, ua, ra, pa))
     e.add_field(name=f"{TYPE_EMOJI.get(b.get('type'), '🎧')} {clip(b['name'], 60)}", value=column(b, sb, ub, rb, pb))
 
@@ -613,7 +615,7 @@ def build_recommend_panel() -> discord.Embed:
             "**3.** What sound do you like? *(pick one or more)*\n"
             "**4.** What matters most to you?"
         ),
-        color=discord.Color.from_rgb(200, 245, 60),
+        color=LIME,
     )
     e.set_footer(text=CREDIT)
     return e
@@ -621,7 +623,7 @@ def build_recommend_panel() -> discord.Embed:
 
 def build_picks_embed(picks: list[tuple[dict, bool]], summary: str, sort: str) -> discord.Embed:
     metric = PRIORITY_INFO[sort][4]
-    e = discord.Embed(title="🎯 Your top picks", color=discord.Color.from_rgb(200, 245, 60))
+    e = discord.Embed(title="🎯 Your top picks", color=LIME)
     if not picks:
         e.description = f"{summary}\n\nNothing matches all of that. Try a wider budget or fewer sound picks."
         e.set_footer(text=CREDIT)
@@ -727,6 +729,139 @@ class PicksView(discord.ui.View):
     async def on_again(self, interaction: discord.Interaction):
         await interaction.response.edit_message(content=None, embed=build_recommend_panel(),
                                                 view=RecommendView(self.api, self.tunings))
+
+
+# ---------- Upgrade finder ----------
+
+PRICE_KEYS = list(PRICES)  # cheapest → priciest
+UPGRADE_PICKS = 5
+
+
+def price_bracket(usd: float | None) -> int | None:
+    """Index into PRICE_KEYS for a launch price ('50' = below $50, '4000' = above $4,000)."""
+    if usd is None:
+        return None
+    for i, key in enumerate(PRICE_KEYS):
+        if "-" in key:
+            low, high = map(float, key.split("-"))
+            if low <= usd < high:
+                return i
+        elif i == 0 and usd < float(key):
+            return i
+        elif i == len(PRICE_KEYS) - 1 and usd >= float(key):
+            return i
+    return None
+
+
+def upgrade_brackets(usd: float | None) -> list[str]:
+    """Same price bracket + the next one up (empty = any price)."""
+    i = price_bracket(usd)
+    return [] if i is None else PRICE_KEYS[i:i + 2]
+
+
+def product_tuning(item: dict) -> str | None:
+    """Tuning handle if the API includes one on products (not guaranteed)."""
+    t = item.get("tuning")
+    if isinstance(t, list):
+        t = t[0] if t else None
+    if isinstance(t, dict):
+        t = t.get("value") or t.get("handle")
+    return str(t) if t else None
+
+
+async def get_upgrades(api: IEMRankingAPI, current: dict, prices: list[str]) -> tuple[list[dict], bool]:
+    """(up to 5 better-scored products, matched_tuning). At most 2 API calls."""
+    base = {"sort": "reviewer-score", "type": current.get("type") or "iem", "price": ",".join(prices) or None,
+            "limit": 25}
+    floor = current.get("score") or 0.0
+
+    def better(results):
+        return [it for it in results if it["url"] != current["url"] and (it.get("score") or 0) > floor]
+
+    tuning = product_tuning(current)
+    if tuning:
+        picks = better((await api.ranking(**base, tuning=tuning)).get("results") or [])
+        if len(picks) >= 3:
+            return picks[:UPGRADE_PICKS], True
+    return better((await api.ranking(**base)).get("results") or [])[:UPGRADE_PICKS], False
+
+
+def build_upgrade_embed(current: dict, picks: list[dict], prices: list[str], matched_tuning: bool) -> discord.Embed:
+    cur_score, cur_price = current.get("score"), current.get("msrp_usd")
+    e = discord.Embed(
+        title=f"🚀 Upgrades from {clip(current['name'], 60)}",
+        url=current["url"],
+        color=LIME,
+    )
+    budget = ", ".join(PRICES[p] for p in prices) if prices else "Any price"
+    lines = [
+        f"Now: ⭐ **{fmt_score(cur_score)}** · 💰 {fmt_price(cur_price)} · {TYPE_LABEL.get(current.get('type'), 'Product')}",
+        f"Looking in: 💰 {budget}" + (" · 🎚️ same tuning" if matched_tuning else ""),
+    ]
+    if not picks:
+        lines.append("\nNothing scores higher in that range. You might already own the best of it! 🏆\n"
+                     "*Try `/upgrade` with a higher budget.*")
+        e.description = "\n".join(lines)
+        e.set_footer(text=CREDIT)
+        return e
+    e.description = "\n".join(lines)
+    for i, item in enumerate(picks, 1):
+        score_diff = (item.get("score") or 0) - (cur_score or 0)
+        price = item.get("msrp_usd")
+        if price is not None and cur_price is not None:
+            diff = price - cur_price
+            price_note = f"{fmt_price(price)} ({'+' if diff >= 0 else '−'}{fmt_price(abs(diff))})"
+        else:
+            price_note = fmt_price(price)
+        e.add_field(
+            name=f"{MEDALS.get(i, f'`#{i}`')} {clip(item['name'], 80)}",
+            value=f"⭐ **{fmt_score(item.get('score'))}** (+{score_diff:.1f}) {bar(item.get('score'), 8)}\n"
+                  f"💰 {price_note} · 📝 {plural(item.get('review_count') or 0, 'review')} · "
+                  f"[Read reviews ↗]({item['url']})",
+            inline=False,
+        )
+    if picks[0].get("image_url"):
+        e.set_thumbnail(url=picks[0]["image_url"])
+    e.set_footer(text=f"{CREDIT} · Higher reviewer score, similar price. Always audition if you can!")
+    return e
+
+
+class UpgradeView(discord.ui.View):
+    """Under private upgrade results: link to each pick + share publicly."""
+
+    def __init__(self, embed: discord.Embed, picks: list[dict]):
+        super().__init__(timeout=600)
+        self.embed = embed
+        for i, item in enumerate(picks, 1):
+            self.add_item(discord.ui.Button(label=clip(f"{i}. {item['name']}", 80), url=item["url"], row=0))
+        share = discord.ui.Button(label="Share to channel", emoji="📢", style=discord.ButtonStyle.primary, row=1)
+        share.callback = self.on_share
+        self.add_item(share)
+
+    async def on_share(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(content="📢 Shared to the channel!", view=None)
+        await interaction.followup.send(content=f"🚀 {interaction.user.mention}'s upgrade ideas", embed=self.embed,
+                                        allowed_mentions=discord.AllowedMentions.none())
+
+
+class UpgradePickView(discord.ui.View):
+    """When /upgrade has no product: pick one of your setup's IEMs/headphones."""
+
+    def __init__(self, cog: "IEMRanking", options: list[str], budget: str | None):
+        super().__init__(timeout=300)
+        self.cog, self.budget = cog, budget
+        select = discord.ui.Select(
+            placeholder="Which one do you want to upgrade from?",
+            options=[discord.SelectOption(label=clip(o, 100), value=str(i)) for i, o in enumerate(options[:25])],
+        )
+        self.options = options
+
+        async def callback(interaction: discord.Interaction):
+            self.stop()
+            await self.cog.run_upgrade(interaction, self.options[int(select.values[0])], self.budget, edit=True)
+
+        select.callback = callback
+        self.add_item(select)
 
 
 # ---------- Cog ----------
@@ -886,6 +1021,66 @@ class IEMRanking(commands.Cog):
 
     compare.autocomplete("first")(product_autocomplete)
     compare.autocomplete("second")(product_autocomplete)
+
+    # ----- /upgrade -----
+
+    @app_commands.command(name="upgrade", description="Find better-scoring IEMs/headphones around your current one's price")
+    @app_commands.describe(
+        current="What you own now (leave empty to pick from your /setup)",
+        budget="Price range to look in (default: same range + one above)",
+    )
+    @app_commands.choices(budget=[app_commands.Choice(name=label, value=value) for value, label in PRICES.items()])
+    async def upgrade(self, interaction: discord.Interaction, current: str | None = None, budget: str | None = None):
+        if current:
+            await self.run_upgrade(interaction, current, budget)
+            return
+        from cogs.setups import lines_of  # local import: setups is optional for this cog
+        setups = self.bot.get_cog("Setups")
+        row = setups.db.get(interaction.user.id) if setups else None
+        owned = [ln for key in ("iems", "headphones", "flatheads") for ln in lines_of((row or {}).get(key))]
+        if not owned:
+            await interaction.response.send_message(
+                "Tell me what you own: `/upgrade current:<name>`, or add your IEMs/headphones with **/setup edit** "
+                "and I'll pick from there.", ephemeral=True)
+            return
+        if len(owned) == 1:
+            await self.run_upgrade(interaction, owned[0], budget)
+            return
+        await interaction.response.send_message("🚀 Pick the one you want to upgrade from:",
+                                                view=UpgradePickView(self, owned, budget), ephemeral=True)
+
+    upgrade.autocomplete("current")(product_autocomplete)
+
+    async def run_upgrade(self, interaction: discord.Interaction, query: str, budget: str | None, edit: bool = False):
+        """Look up `query`, find upgrades, reply privately. edit=True updates the picker message instead."""
+        if not await gate(interaction):
+            return
+        if edit:
+            await interaction.response.edit_message(content=f"🔍 Looking up **{clip(query, 80)}**…", view=None)
+        else:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+        async def reply(**kwargs):
+            if edit:
+                await interaction.edit_original_response(**kwargs)
+            else:  # send() doesn't accept None for view/embed
+                await interaction.followup.send(**{k: v for k, v in kwargs.items() if v is not None}, ephemeral=True)
+
+        try:
+            results, _ = await self.find(query)
+            if not results:
+                await reply(content=f"🔍 Couldn't find “{clip(query, 80)}” on IEMRanking. Try `/upgrade current:` "
+                                    "with the exact name.", embed=None, view=None)
+                return
+            current = results[0]
+            prices = [budget] if budget else upgrade_brackets(current.get("msrp_usd"))
+            picks, matched = await get_upgrades(self.api, current, prices)
+        except APIError as exc:
+            await reply(content=str(exc), embed=None, view=None)
+            return
+        embed = build_upgrade_embed(current, picks, prices, matched)
+        view = UpgradeView(embed, picks) if picks else discord.utils.MISSING
+        await reply(content=None, embed=embed, view=view)
 
     # ----- prefix: !search <name> -----
 
