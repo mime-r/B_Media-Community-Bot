@@ -18,7 +18,7 @@ This data is stored in a database on the bot's hosting server.
 
 ## 2. Data we process but do not store
 
-- **Messages:** The bot reads messages only to detect prefix commands (e.g. `!help`). Message content is not saved or logged.
+- **Messages:** The bot does not read general chat. Discord only shows it the content of messages that @mention it, which it checks for commands (e.g. `@B_Media Community Bot help`). Message content is not saved or logged.
 - **Server and member info:** Commands like `/serverinfo`, `/userinfo` and `/whohas` read info Discord already provides (names, avatars, roles, join dates) to build a reply. This is not saved.
 - **Rate limits and cooldowns:** Your user ID and usage count are kept in memory for up to one hour to stop spam. They are cleared when the bot restarts.
 - **Cached results:** IEMRanking search results are kept in memory for about 5 minutes to reduce API use. These contain product data, not personal data.

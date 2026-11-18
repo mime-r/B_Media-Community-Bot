@@ -89,7 +89,8 @@ class Moderation(commands.Cog):
         elif isinstance(error, commands.BotMissingPermissions):
             await ctx.send("I need the **Manage Channels** permission here.")
         elif isinstance(error, commands.BadArgument):
-            await ctx.send("Usage: `!slowmode <seconds> [#channel]` — e.g. `!slowmode 3`")
+            p = ctx.clean_prefix
+            await ctx.send(f"Usage: `{p}slowmode <seconds> [#channel]` — e.g. `{p}slowmode 3`")
         elif isinstance(error, commands.CommandInvokeError) and isinstance(error.original, discord.Forbidden):
             await ctx.send("I don't have permission to edit that channel.")
         # MissingRequiredArgument falls through to the global handler in main.py

@@ -21,13 +21,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(BOT_NAME)
 
 intents = discord.Intents.default()
-intents.message_content = True  # needed for prefix commands (privileged)
-# members intent disabled — /whohas falls back to mentions instead of the member cache
+# No privileged intents (avoids Discord's intent review):
+# - no message_content: prefix commands only work via @mention (and in DMs)
+# - no members: /whohas shows raw mentions instead of using the member cache
 
 
 class CommunityBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix=PREFIX, intents=intents, help_command=None)
+        super().__init__(command_prefix=commands.when_mentioned_or(PREFIX), intents=intents, help_command=None)
 
     async def setup_hook(self):
         await self.load_extension("cogs.setups")
@@ -45,28 +46,34 @@ bot = CommunityBot()
 @bot.event
 async def on_ready():
     log.info("%s online as %s (ID: %s)", BOT_NAME, bot.user, bot.user.id)
-    await bot.change_presence(activity=discord.Game(name=f"{PREFIX}help | /help"))
+    await bot.change_presence(activity=discord.Game(name="/help"))
 
 
 # ---------- Shared embed builders ----------
 
 def help_embed() -> discord.Embed:
     e = discord.Embed(title=f"{BOT_NAME} - Commands", color=discord.Color.blurple())
-    e.add_field(name="ping", value="Check bot latency", inline=False)
-    e.add_field(name="hello", value="Say hello", inline=False)
-    e.add_field(name="serverinfo", value="Info about this server", inline=False)
-    e.add_field(name="userinfo [member]", value="Info about a member", inline=False)
+    e.add_field(
+        name="ℹ️ General",
+        value=(
+            "`/ping` — check bot latency\n"
+            "`/hello` — say hello\n"
+            "`/serverinfo` — info about this server\n"
+            "`/userinfo [member]` — info about a member"
+        ),
+        inline=False,
+    )
     e.add_field(
         name="🎧 Setup profiles",
         value=(
             "`/setup edit` — add/edit your gear, IEMs, speakers & extras\n"
             "`/setup view [member]` — show a setup\n"
             "`/setup clear` — delete your setup\n"
+            "`/whohas <gear>` — find members who own a piece of gear\n"
             "Right-click a user → Apps → **View Setup**"
         ),
         inline=False,
     )
-    e.add_field(name="🔍 whohas <gear>", value="Find members who own a piece of gear", inline=False)
     e.add_field(
         name="📈 IEMRanking",
         value=(
@@ -77,8 +84,12 @@ def help_embed() -> discord.Embed:
         ),
         inline=False,
     )
-    e.add_field(name="🐢 slowmode <seconds> [channel]", value="*Mods:* custom slowmode, any seconds (e.g. 3). 0 = off", inline=False)
-    e.set_footer(text=f"Use /command or {PREFIX}command")
+    e.add_field(
+        name="🐢 Moderation",
+        value="`/slowmode <seconds> [channel]` — *mods:* custom slowmode, any seconds (e.g. 3). 0 = off",
+        inline=False,
+    )
+    e.set_footer(text="Also: @mention me + help, ping, hello, serverinfo, userinfo, setup, whohas, search, slowmode")
     return e
 
 
@@ -172,7 +183,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         await ctx.send("Couldn't find that member.")
         return
     if isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Missing `{error.param.name}`. Usage: `{PREFIX}{ctx.command.qualified_name} {ctx.command.signature}`")
+        await ctx.send(f"Missing `{error.param.name}`. Usage: `{ctx.clean_prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         return
     if isinstance(error, commands.NoPrivateMessage):
         await ctx.send("That command only works in a server.")
