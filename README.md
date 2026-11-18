@@ -35,6 +35,10 @@ Rate limits (tune at the top of `cogs/iemranking.py`):
 ## Data
 Setups are stored in `bmedia.db` (SQLite, created automatically next to `main.py`). Override location with `DB_PATH` env var. **Back this file up** — deleting it wipes all profiles.
 
+## Legal
+- [Terms of Service](TERMS.md)
+- [Privacy Policy](PRIVACY.md)
+
 ## 1. Create the bot (Discord Developer Portal)
 1. https://discord.com/developers/applications → **New Application** → name `B_Media Community Bot`.
 2. **Bot** tab → **Reset Token** → copy token (keep secret).
