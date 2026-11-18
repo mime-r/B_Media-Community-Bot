@@ -226,15 +226,15 @@ def build_whohas_embed(guild: discord.Guild, query: str, rows: list[dict]) -> di
     q = norm(query)
     entries = []
     for row in rows:
+        # No members intent: cache is sparse, so fall back to a raw mention (Discord renders the name)
         member = guild.get_member(row["user_id"])
-        if member is None:  # only show members of this server
-            continue
         hits = []
         for key in SEARCH_KEYS:
             emoji = FIELD_INFO[key][2]
             hits += [f"{emoji} {clip(ln, 60)}" for ln in lines_of(row.get(key)) if q in norm(ln)]
         if hits:
-            entries.append((member.display_name.lower(), f"{member.mention} — {' · '.join(hits)}"))
+            sort_key = member.display_name.lower() if member else f"~{row['user_id']}"
+            entries.append((sort_key, f"<@{row['user_id']}> — {' · '.join(hits)}"))
     entries.sort()
 
     e = discord.Embed(title=f"🔍 Who has “{clip(query, 50)}”?", color=GOLD)

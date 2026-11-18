@@ -22,7 +22,7 @@ log = logging.getLogger(BOT_NAME)
 
 intents = discord.Intents.default()
 intents.message_content = True  # needed for prefix commands (privileged)
-intents.members = True          # needed for /whohas member lookups (privileged)
+# members intent disabled — /whohas falls back to mentions instead of the member cache
 
 
 class CommunityBot(commands.Bot):
