@@ -78,7 +78,11 @@ LOW_BUDGET_SECONDS = 60
 
 
 class APIError(Exception):
-    """Error with a message that is safe to show to users."""
+    """Error with a message that is safe to show to users. `status` is the HTTP status when the API answered."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class SlidingLimit:
@@ -202,9 +206,10 @@ class IEMRankingAPI:
             async with self._session().get(API_BASE + endpoint, params=params) as resp:
                 if resp.status == 429:
                     retry = int(resp.headers.get("Retry-After", "60") or 60)
-                    self.blocked_until = now + retry
-                    log.warning("IEMRanking 429: blocked for %ss", retry)
-                    raise APIError(f"⏳ IEMRanking is busy. Try again <t:{int(time.time()) + retry}:R>.")
+                    if endpoint != "catalog":  # catalog's own downloads-per-day limit shouldn't stop everything
+                        self.blocked_until = now + retry
+                    log.warning("IEMRanking 429 on %s: retry in %ss", endpoint, retry)
+                    raise APIError(f"⏳ IEMRanking is busy. Try again <t:{int(time.time()) + retry}:R>.", 429)
                 remaining = resp.headers.get("X-RateLimit-Remaining", "")
                 if remaining.isdigit() and int(remaining) <= API_RESERVE:
                     self.low_until = now + LOW_BUDGET_SECONDS
@@ -223,8 +228,8 @@ class IEMRankingAPI:
         if not data.get("success"):
             if resp.status == 401:
                 log.error("IEMRanking rejected the API key")
-                raise APIError("IEMRanking rejected the bot's API key. Tell a server admin.")
-            raise APIError(data.get("message") or f"IEMRanking error (HTTP {resp.status}).")
+                raise APIError("IEMRanking rejected the bot's API key. Tell a server admin.", 401)
+            raise APIError(data.get("message") or f"IEMRanking error (HTTP {resp.status}).", resp.status)
 
         self.cache[cache_key] = (now + ttl, data)
         if len(self.cache) > 500:  # prune expired entries
@@ -239,6 +244,14 @@ class IEMRankingAPI:
 
     async def filters(self) -> dict:
         return await self.get("filters", ttl=FILTERS_TTL)
+
+    async def random(self, count: int = 1, seed: str | None = None, **filters) -> dict:
+        """Random products (same seed + filters = same picks). Unseeded picks aren't cached."""
+        return await self.get("random", ttl=CACHE_TTL if seed else 0, count=count, seed=seed, **filters)
+
+    async def catalog(self, kind: str = "iem") -> dict:
+        """Whole main ranking of one type. Needs catalog access (403 otherwise); a few downloads per day."""
+        return await self.get("catalog", ttl=FILTERS_TTL, type=kind)
 
 
 # ---------- Formatting helpers ----------

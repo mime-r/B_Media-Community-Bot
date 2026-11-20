@@ -83,7 +83,7 @@ HELP = [
         ("/iemdle play", "Today's guess-the-IEM puzzle and rules"),
         ("/iemdle guess <iem>", "Make a guess (6 tries, hints after each)"),
         ("/iemdle stats", "Your streak and guess distribution"),
-        ("/worldcup status", "Current IEM World Cup bracket"),
+        ("/iemcup status", "Current IEM Cup bracket"),
         ("/leaderboard [game]", "Top players in this server"),
     ], False),
     ("moderation", "🛡️", "Moderation", "Staff tools, every action saved as a case", [
@@ -98,8 +98,9 @@ HELP = [
         ("/case view|reason|delete <number>", "Look up or edit a case"),
         ("/slowmode <seconds> [channel]", "Custom slowmode, any seconds"),
         ("/setup remove <user>", "Delete someone's setup"),
-        ("/worldcup start|cancel", "Run an IEM World Cup event"),
+        ("/iemcup start|cancel", "Run an IEM Cup (top of a list, random draw or hand-picked)"),
         ("/modconfig", "*Admins:* log channel, mod roles, setup check"),
+        ("/gamesconfig channel|view|off", "*Admins:* game channel (bot-run, one thread per game)"),
     ], True),
 ]
 HELP_INFO = {h[0]: h for h in HELP}

@@ -14,13 +14,13 @@ The bot keeps data permanently only when you save a setup, play a game, or when 
 | Setup fields you type in (source/DAC/amp, headphones/IEMs/speakers, accessories, genres, notes) | You use `/setup edit` | To show your setup with `/setup view` and let others find it with `/whohas` |
 | Time of last update | You save a setup | To show when the profile was last changed |
 | IEMdle guesses and results (which IEMs you guessed each day, solved or not) | You use `/iemdle guess` | To show your board, streak and stats |
-| World Cup votes (which product you voted for in each match) | You press a vote button | To count votes and award prediction points |
-| Game points per server | You score in IEMdle or World Cup | To show `/leaderboard` |
+| IEM Cup votes (which product you voted for in each match) | You press a vote button | To count votes and award prediction points |
+| Game points per server | You score in IEMdle or IEM Cup | To show `/leaderboard` |
 | Moderation cases: your user ID and username, the moderator's ID and username, the action (warn/kick/ban/mute…), reason, duration, time, and whether the DM reached you | A moderator uses a moderation command on you | So server staff can review a member's history with `/cases` |
 
 This data is stored in a database on the bot's hosting server.
 
-For each server, the bot also stores moderation settings chosen by server admins: the server ID, the mod log channel ID and the IDs of moderator roles. It also stores World Cup events (name, channel, entrants), which are not personal data.
+For each server, the bot also stores moderation settings chosen by server admins: the server ID, the mod log channel ID and the IDs of moderator roles, and the game channel settings (channel ID, daily IEMdle on/off, ping role ID). It also stores IEM Cup events (name, channel, thread, entrants) and the IDs of IEMdle threads, which are not personal data.
 
 ## 2. Data we process but do not store
 
@@ -43,7 +43,7 @@ We do not sell, rent or share your data with anyone else, and we do not use it f
 
 Setup profiles are public inside servers where the bot is present: any member can view your setup with `/setup view` or find you with `/whohas`. Don't put anything in your setup you wouldn't want other members to see.
 
-IEMdle guesses are private to you unless you press **Share result**, which posts only a coloured grid (no product names). Leaderboard points are visible to members of that server. World Cup vote counts are public, but who voted for what is not shown. Moderation cases are visible only to that server's moderators.
+IEMdle guesses are private to you. When you finish a puzzle in a server with a game channel, the bot posts your result in that day's IEMdle thread: your name, the number of tries, your streak and a coloured grid (no product names). Elsewhere, nothing is posted unless you press **Share result**. Leaderboard points are visible to members of that server. IEM Cup vote counts are public, but who voted for what is not shown. Moderation cases are visible only to that server's moderators.
 
 ## 5. How long we keep it
 

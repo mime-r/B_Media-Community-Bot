@@ -10,7 +10,7 @@ You must follow [Discord's Terms of Service](https://discord.com/terms) and [Com
 
 ## 2. What the bot does
 
-The bot provides community features such as setup profiles, gear search (`/whohas`), IEMRanking product lookups, rankings, comparisons, recommendations and upgrade suggestions, games (IEMdle and IEM World Cup), server/user info, and moderation tools for staff.
+The bot provides community features such as setup profiles, gear search (`/whohas`), IEMRanking product lookups, rankings, comparisons, recommendations and upgrade suggestions, games (IEMdle and IEM Cup), server/user info, and moderation tools for staff.
 
 ## 3. Acceptable use
 
@@ -35,7 +35,7 @@ Product info, scores, rankings and prices come from IEMRanking and may be incomp
 
 ## 6. Games
 
-Games are just for fun. Points, streaks and leaderboards have no monetary value and there are no prizes from us. World Cup results reflect community votes, not product quality. We may reset scores, fix mistakes or remove points gained by cheating.
+Games are just for fun. Points, streaks and leaderboards have no monetary value and there are no prizes from us. IEM Cup results reflect community votes, not product quality. We may reset scores, fix mistakes or remove points gained by cheating.
 
 ## 7. Moderation tools
 
