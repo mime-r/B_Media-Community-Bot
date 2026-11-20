@@ -51,6 +51,7 @@ The bot uses **no privileged intents**, so it can't read normal messages. Text c
 | `/leaderboard [game]` | — | Top 10 in this server + your rank |
 | `/gamesconfig channel <channel> [daily_iemdle] [ping_role]` | — | Admins. Make a channel the bot-run game channel (see below) |
 | `/gamesconfig view` / `off` | — | Admins. Health check / stop and unlock the channel |
+| `/gamesconfig answer` | — | Admins. Privately see today's IEMdle answer (spoiler-tagged; each look is logged) |
 
 Right-click a user → **Apps → View Setup** also works.
 

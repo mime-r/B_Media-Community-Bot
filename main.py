@@ -100,8 +100,7 @@ HELP = [
         ("/setup remove <user>", "Delete someone's setup"),
         ("/iemcup start|cancel", "Run an IEM Cup (top of a list, random draw or hand-picked)"),
         ("/modconfig", "*Admins:* log channel, mod roles, setup check"),
-        ("/gamesconfig channel|view|off", "*Admins:* game channel (bot-run, one thread per game)"),
-    ], True),
+        ("/gamesconfig channel|view|off", "*Admins:* game channel (bot-run, one thread per game)"),    ], True),
 ]
 HELP_INFO = {h[0]: h for h in HELP}
 

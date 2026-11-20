@@ -85,6 +85,11 @@ def next_reset() -> int:
     return int(datetime.combine(today() + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).timestamp())
 
 
+def slug(url: str | None) -> str:
+    """Product slug from its URL ('…/show/moondrop-chu-ii/' → 'moondrop-chu-ii'), to match across endpoints."""
+    return (url or "").split("?")[0].rstrip("/").rsplit("/", 1)[-1].lower()
+
+
 def perm_name(perm: str) -> str:
     return PERM_NAMES.get(perm, perm.replace("_", " ").title())
 
@@ -399,7 +404,8 @@ def board_embed(day: date, play: dict, answer: dict, pool_size: int, stats: dict
     elif not guesses:
         e.description = rules_text(pool_size)
     else:
-        e.description = f"Guess **{len(guesses) + 1}/{MAX_TRIES}** · use `/iemdle guess`"
+        left = MAX_TRIES - len(guesses)
+        e.description = f"**{len(guesses)}/{MAX_TRIES}** guesses used · **{left}** left · keep going with `/iemdle guess`"
     for i, g in enumerate(guesses, 1):
         e.add_field(name=f"{i}. {clip(g['name'], 80)}", value=guess_line(g, answer), inline=False)
     e.add_field(name="​", value=f"⏰ Next puzzle <t:{next_reset()}:R>", inline=False)
@@ -641,24 +647,31 @@ class Games(commands.Cog):
                 break
         return pool
 
-    async def pick_answer(self, day: str, pool: list[dict]) -> dict:
-        """Seeded /random pick among well-known IEMs (catalog pools), else a seeded pick from the top 100."""
-        recent = self.db.recent_answers((today() - timedelta(days=NO_REPEAT_DAYS)).isoformat())
-        by_url = {it["url"]: it for it in pool}
+    async def pick_answer(self, day: str, pool: list[dict]) -> tuple[dict, str]:
+        """(answer, how it was picked). Seeded /random pick among well-known IEMs (catalog pools),
+        else a seeded pick from the top 100."""
+        recent = {slug(u) for u in self.db.recent_answers((today() - timedelta(days=NO_REPEAT_DAYS)).isoformat())}
+        by_slug = {slug(it["url"]): it for it in pool}
+        reason = "no catalog access"
         if len(pool) > FALLBACK_POOL:
             try:
                 data = await self.api.random(count=10, seed=f"iemdle-{day}", type="iem",
                                              min_reviews=ANSWER_MIN_REVIEWS)
-                for it in data.get("results") or []:
-                    if it.get("url") in by_url and it["url"] not in recent:
-                        by_url[it["url"]].update(slim(it))  # adds photo + user score
-                        return by_url[it["url"]]
+                results = data.get("results") or []
+                for it in results:
+                    s = slug(it.get("url"))
+                    if s in by_slug and s not in recent:
+                        # adds photo + user score; keeps the catalog's url so guesses compare equal
+                        by_slug[s].update({k: v for k, v in slim(it).items() if k != "url"})
+                        return by_slug[s], "random"
+                matched = sum(slug(it.get("url")) in by_slug for it in results)
+                reason = f"/random gave {len(results)} picks, {matched} in the catalog, all used recently or unmatched"
             except APIError as exc:
-                log.warning("IEMdle: /random failed (%s), picking from the top %d", exc, FALLBACK_ANSWERS)
+                reason = f"/random failed: {exc}"
         top = pool[:FALLBACK_ANSWERS]
-        candidates = [it for it in top if it["url"] not in recent] or top
+        candidates = [it for it in top if slug(it["url"]) not in recent] or top
         seed = int(hashlib.sha256(f"iemdle-{day}".encode()).hexdigest(), 16)
-        return random.Random(seed).choice(candidates)
+        return random.Random(seed).choice(candidates), f"fallback ({reason})"
 
     def cached_puzzle(self) -> tuple[list[dict], dict] | None:
         """Today's puzzle from memory or the database, never the API."""
@@ -685,7 +698,9 @@ class Games(commands.Cog):
             pool = await self.load_pool()
             if len(pool) < 10:
                 raise APIError("Couldn't load enough IEMs for today's puzzle. Try again later.")
-            answer = await self.pick_answer(day, pool)
+            answer, how = await self.pick_answer(day, pool)
+            log.info("IEMdle %s: answer is %s (%s) · pool of %d IEMs (%s), picked via %s", day, answer["name"],
+                     answer["url"], len(pool), "catalog" if len(pool) > FALLBACK_POOL else "top of /ranking", how)
             self.db.save_day(day, pool, answer["url"])
             self.db.prune_pools((today() - timedelta(days=KEEP_POOLS_DAYS)).isoformat())
             self.pool_cache = {day: (pool, answer)}
@@ -990,6 +1005,33 @@ class Games(commands.Cog):
             except discord.HTTPException:
                 msg += f"\n⚠️ I couldn't unlock {channel.mention}; reset its @everyone permissions manually."
         await interaction.response.send_message(msg, ephemeral=True)
+
+    @gamesconfig.command(name="answer", description="Admins: privately see today's IEMdle answer")
+    async def gc_answer(self, interaction: discord.Interaction):
+        # Hidden via default_permissions, but servers can override that, so check again
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("Only admins (Manage Server) can see the answer.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            pool, answer = await self.today_puzzle()
+        except APIError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        log.info("IEMdle answer viewed by %s (%s) in guild %s", interaction.user, interaction.user.id,
+                 interaction.guild.id)
+        rank = f"#{answer['rank']:,}" if answer.get("rank") else "—"
+        e = discord.Embed(title=f"🔒 IEMdle #{puzzle_no(today())} answer", color=GAME, description=(
+            f"||**[{answer['name']}]({answer['url']})**||\n"
+            f"🏷️ ||{answer.get('brand') or '?'}|| · 💰 ||{fmt_price(answer.get('msrp_usd'))}|| · "
+            f"⭐ ||{fmt_score(answer.get('score'))}|| · 📊 ||{rank}||\n\n"
+            f"-# Hidden in spoilers in case you're screen sharing. Only you can see this. "
+            f"Next puzzle <t:{next_reset()}:R>."
+        ))
+        if not self.db.get_play(today().isoformat(), interaction.user.id)["finished"]:
+            e.add_field(name="😇 Play fair", value="You haven't finished today's puzzle. You can still play, "
+                                                  "but you know the answer now!", inline=False)
+        await interaction.followup.send(embed=brand_footer(e), ephemeral=True)
 
     @gamesconfig.command(name="view", description="Show game channel settings and check my permissions")
     async def gc_view(self, interaction: discord.Interaction):
