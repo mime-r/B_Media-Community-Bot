@@ -35,7 +35,7 @@ from cogs.style import BAD, GAME, GOLD, OK, WARN, brand_footer, check
 log = logging.getLogger("B_Media Community Bot")
 
 # ----- IEMdle settings -----
-IEMDLE_EPOCH = date(2026, 11, 1)   # puzzle #1
+IEMDLE_EPOCH = date(2026, 11, 20)  # puzzle #1 (launch day)
 FALLBACK_POOL = 150                # without catalog access: guessable = top N by reviewer score
 FALLBACK_ANSWERS = 100             # ...and answers come from the top N
 ANSWER_MIN_REVIEWS = 6             # with the catalog: answers are well-known IEMs (this many reviews or more)
